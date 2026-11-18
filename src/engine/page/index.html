@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>能力中心</title>
+  <script>
+    (() => {
+      let scheme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      try {
+        if (window.parent !== window) {
+          scheme = window.parent.document.body?.hasAttribute('data-ds-dark-theme') ? 'dark' : 'light';
+        }
+      } catch {
+        // The system preference remains the standalone fallback.
+      }
+      document.documentElement.dataset.theme = scheme;
+    })();
+  </script>
+  <link rel="stylesheet" href="/capability-center/styles.css">
+</head>
+<body>
+  <main class="center-shell">
+    <header class="page-head">
+      <div class="heading-block">
+        <h1>能力中心</h1>
+        <p class="page-intro">从内网安装技能、DSH 插件、Python 库与组合能力。试用只创建新会话草稿，不会自动发送。</p>
+      </div>
+      <section class="core-panel" id="core-panel" aria-label="核心版本">
+        <div class="core-version">
+          <span>核心</span>
+          <strong id="core-version">读取中</strong>
+        </div>
+        <button class="button button-quiet" id="core-check" type="button" disabled>检查更新</button>
+        <button class="button button-primary" id="core-stage" type="button" hidden>准备更新</button>
+      </section>
+    </header>
+
+    <section class="notice" id="core-notice" hidden aria-live="polite"></section>
+    <section class="notice notice-warning" id="migration-notice" hidden>
+      <strong>检测到旧版能力中心管理器</strong>
+      <span>请先在 DSH“插件”中停用并移除 capability-center-demo 管理器一次；其安装的 3 项能力会保留并在本机账本中显示。新版核心以后不需要卸载。</span>
+    </section>
+    <section class="notice notice-warning" id="recovery-notice" hidden></section>
+
+    <section class="source-panel" id="source-panel" aria-labelledby="source-heading">
+      <div class="source-copy">
+        <h2 id="source-heading">内网目录</h2>
+        <p>服务器地址仅保存在当前浏览器；目录、哈希与本机检查均由 DSH 本地 API 完成。</p>
+      </div>
+      <form class="source-form" id="source-form">
+        <label for="server-url">分发服务器地址</label>
+        <div class="source-controls">
+          <input id="server-url" name="server-url" type="url" inputmode="url" autocomplete="url"
+            placeholder="http://192.168.1.20:8765" spellcheck="false" required>
+          <button class="button button-primary" id="connect-button" type="submit">保存并刷新</button>
+          <button class="button button-quiet" id="offline-button" type="button">只看本机</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="catalog" aria-labelledby="catalog-heading">
+      <div class="catalog-head">
+        <div>
+          <h2 id="catalog-heading">能力目录</h2>
+          <p id="catalog-summary" class="catalog-summary">正在读取本机账本</p>
+        </div>
+        <div class="connection" id="connection" data-state="idle" role="status" aria-live="polite">
+          <span class="connection-dot" aria-hidden="true"></span>
+          <span id="connection-text">尚未连接</span>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <div class="filters" id="filters" role="group" aria-label="能力类型">
+          <button type="button" class="filter" data-filter="all" aria-pressed="true">全部</button>
+          <button type="button" class="filter" data-filter="skill" aria-pressed="false">技能</button>
+          <button type="button" class="filter" data-filter="plugin" aria-pressed="false">插件</button>
+          <button type="button" class="filter" data-filter="python" aria-pressed="false">Python 库</button>
+          <button type="button" class="filter" data-filter="composite" aria-pressed="false">组合</button>
+          <button type="button" class="filter" data-filter="installed" aria-pressed="false">已安装</button>
+        </div>
+        <label class="search" for="search-input">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.7" cy="8.7" r="5.2"/><path d="m12.7 12.7 3.7 3.7"/></svg>
+          <span class="visually-hidden">搜索能力</span>
+          <input id="search-input" type="search" placeholder="搜索名称或说明" autocomplete="off">
+        </label>
+      </div>
+
+      <div class="state-panel" id="state-panel" aria-live="polite">
+        <div class="empty-mark" aria-hidden="true">
+          <svg viewBox="0 0 48 48"><rect x="7" y="7" width="14" height="14" rx="2"/><rect x="27" y="7" width="14" height="14" rx="2"/><rect x="7" y="27" width="14" height="14" rx="2"/><path d="M34 27v14M27 34h14"/></svg>
+        </div>
+        <strong>正在读取能力</strong>
+        <span>本机账本无需分发服务器即可管理已安装能力。</span>
+      </div>
+      <ol class="capability-list" id="capability-list" aria-label="能力列表"></ol>
+    </section>
+
+    <p class="privacy-note">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.8 16 5v4.3c0 3.7-2.4 6.3-6 7.9-3.6-1.6-6-4.2-6-7.9V5z"/><path d="m7.3 10 1.8 1.8 3.8-4"/></svg>
+      能力包由内网服务器提供。安装与检查在本机完成，本机系统信息不会上传到分发服务器。
+    </p>
+  </main>
+  <script src="/capability-center/app.js" defer></script>
+</body>
+</html>

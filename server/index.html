@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DSH 能力中心内网分发</title>
+<style>
+:root{color-scheme:dark;font-family:"Segoe UI","PingFang SC",sans-serif;background:#090c13;color:#f1f5ff}
+body{max-width:780px;margin:0 auto;padding:48px 24px;line-height:1.65;background:radial-gradient(circle at 15% 0,#17244b 0,transparent 32%),#090c13}
+main{padding:30px;border:1px solid #27334a;border-radius:14px;background:#111722;box-shadow:0 20px 55px #0008}
+h1{margin:0 0 10px;font-size:28px;line-height:1.25}h2{margin:28px 0 8px;font-size:17px}p{color:#b8c3d8}
+code,a{font-family:ui-monospace,Consolas,monospace}code{background:#18202e;padding:2px 5px;border-radius:4px;overflow-wrap:anywhere;color:#dce6ff}
+ol{padding-left:22px}.url{padding:12px;border:1px solid #35425a;border-radius:8px;background:#0b1019}.note{color:#e0b66d}
+</style>
+<main>
+<h1>DSH 能力中心内网分发</h1>
+<p>只读服务：提供固定目录、能力制品、核心版本索引和稳定引导插件。没有账号、上传或远程安装接口。</p>
+<h2>首次安装</h2>
+<ol>
+<li>打开 DSH“插件”，选择“添加插件”。</li>
+<li>粘贴稳定引导插件 tgz 地址。</li>
+<li>安装并启用，按 DSH 返回结果决定是否重启。</li>
+<li>打开侧栏“能力中心”，填写本页基础地址。</li>
+</ol>
+<p class="url"><code id="plugin-url">{{BOOTSTRAP_URL}}</code></p>
+<h2>从旧管理器迁移</h2>
+<p class="note">若曾安装 capability-center-demo，请先在 DSH 插件页停用并移除旧管理器一次。报告格式、本机系统信息和 Tabulate 会从本机回执与 profile 检测并在新账本中显示；不要删除这三项能力或 DSH 配置。</p>
+<h2>后续更新</h2>
+<p>频繁更新的核心通过页面顶部“检查更新 / 准备更新”下载。准备完成后当前进程继续运行；下次启动 DSH 时切换，启动失败自动回退上一健康核心。能力中心稳定引导插件只在协议升级时需要人工处理。</p>
+<h2>目录</h2>
+<p><a id="base-url" href="/">/</a> · <a href="/catalog.json">catalog.json</a> · <a href="/core-release-index.json">core-release-index.json</a> · <a href="/publication-registry.json">publication-registry.json</a></p>
+</main>
+<script>
+const base=location.origin;document.getElementById('base-url').textContent=base;
+const raw=document.getElementById('plugin-url').textContent.trim();
+document.getElementById('plugin-url').textContent=raw.startsWith('/')?base+raw:raw;
+</script>
+</html>

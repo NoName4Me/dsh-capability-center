@@ -1,0 +1,17 @@
+/dist/
+/.build/
+/capability-center-offline.zip
+/capability-center-offline.zip.sha256
+/docs/verification/
+node_modules/
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.log
+.env
+.env.*
+!.env.example

@@ -1,0 +1,15 @@
+{
+  "name": "capability-center-workspace",
+  "version": "0.2.2",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node build.mjs && node --test --test-concurrency=1 tests/*.test.js",
+    "publish:core": "node tools/publish.mjs core",
+    "publish:catalog": "node tools/publish.mjs catalog"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
