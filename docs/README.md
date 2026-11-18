@@ -7,6 +7,7 @@
 
 ## 技术调研
 
+- [内网两版 DSH 内置能力清单](research/dsh-builtin-capabilities.md)
 - [DSH rc.2 能力中心源码核查](research/dsh-rc2-capability-center.md)
 - [DSH 插件市场方案对比](research/dsh-market-alternatives.md)
 - [DSH 内置办公能力核查](research/dsh-builtin-office-rc2.md)

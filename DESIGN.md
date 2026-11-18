@@ -6,6 +6,17 @@
 
 设计参考了 [dsh-market](https://github.com/dsh-market/dsh-market/tree/88de9575946485c1dac5e1a5fbe57fa1f3c3988c)。对该仓库 `88de9575946485c1dac5e1a5fbe57fa1f3c3988c`（`dshmarket@1.73.20`，MIT）仅借鉴目录/本机分离、变更前日志、明确更新状态和失败码等架构模式，没有复制其大段实现或品牌资产。其官方桌面原位更新在宿主提供 package manager 时可用，但依赖公共包通道；本产品改用稳定引导与版本化核心，以适配无明显通用热替换保证的隔离内网。
 
+### 内网终端环境
+
+| 操作系统 | 架构 | 已安装的 DSH |
+| --- | --- | --- |
+| Windows 10 | x64 | `deepseek-harness-0.2.2-rc.2` |
+| Windows 7 | x64 | `deepseek-harness-0.2.1-rc.5-win7` |
+
+新增或修改能力时，以这两组环境为参考，分别评估宿主接口、运行时依赖和离线安装的兼容性。实机验证结果按对应的 Windows 和 DSH 版本记录。
+
+开发新能力前，先查阅 [DSH 内置能力清单](docs/research/dsh-builtin-capabilities.md)，了解两版可复用的技能、工具和随包运行时。
+
 ## 进程与生命周期
 
 ```text
