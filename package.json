@@ -1,15 +1,20 @@
 {
   "name": "capability-center-workspace",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
     "test": "node build.mjs && node --test --test-concurrency=1 tests/*.test.js",
     "publish:core": "node tools/publish.mjs core",
-    "publish:catalog": "node tools/publish.mjs catalog"
+    "publish:catalog": "node tools/publish.mjs catalog",
+    "dev": "npm run build && node tools/preview.mjs",
+    "typecheck": "tsc --noEmit"
   },
   "engines": {
     "node": ">=22"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
   }
 }

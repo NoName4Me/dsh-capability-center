@@ -16,7 +16,7 @@ const packages = join(dist, 'packages')
 const coreDirectory = join(dist, 'core')
 const work = join(root, '.build')
 const python = process.env.CAPABILITY_CENTER_BUILD_PYTHON || 'python3'
-const version = '0.2.2'
+const { version } = JSON.parse(await readFile(join(root, 'src', 'engine', 'manifest.json'), 'utf8'))
 const offlineArchive = join(root, 'capability-center-offline.zip')
 
 function run(command, args, options = {}) {
@@ -75,7 +75,14 @@ await cp(join(root, 'src', 'engine', 'package.json'), join(coreBuild, 'package.j
 await cp(join(root, 'src', 'engine', 'index.js'), join(coreBuild, 'engine', 'index.js'))
 await cp(join(root, 'src', 'engine', 'service.js'), join(coreBuild, 'engine', 'service.js'))
 await cp(join(root, 'src', 'engine', 'lib'), join(coreBuild, 'engine', 'lib'), { recursive: true })
-await cp(join(root, 'src', 'engine', 'page'), join(coreBuild, 'page'), { recursive: true })
+for (const file of ['index.html', 'styles.css']) {
+  await cp(join(root, 'src', 'engine', 'page', file), join(coreBuild, 'page', file))
+}
+run(process.execPath, [
+  join(root, 'node_modules', 'typescript', 'bin', 'tsc'),
+  '--project', join(root, 'tsconfig.json'),
+  '--outDir', join(coreBuild, 'page'),
+])
 const coreZip = join(coreDirectory, `capability-center-core-${version}.zip`)
 await makeZip(coreBuild, coreZip)
 
@@ -87,29 +94,6 @@ const packedBootstrap = JSON.parse(run('npm', ['pack', '--json', '--pack-destina
 }))[0]
 if (typeof packedBootstrap?.filename !== 'string') throw new Error('Bootstrap npm pack returned no filename')
 
-const sysinfoRoot = join(root, 'src', 'capabilities', 'dsh-local-sysinfo')
-const packedSysinfo = JSON.parse(run('npm', ['pack', '--json', '--pack-destination', packages], {
-  cwd: sysinfoRoot,
-}))[0]
-if (typeof packedSysinfo?.filename !== 'string') throw new Error('Sysinfo npm pack returned no filename')
-
-const skillZip = join(packages, 'report-format-1.0.0.zip')
-// Preserve the existing 1.0.0 artifact identity while generating it from source.
-run(python, ['-c', [
-  'import pathlib, sys, zipfile',
-  'source = pathlib.Path(sys.argv[1])',
-  'with zipfile.ZipFile(sys.argv[2], "w", zipfile.ZIP_DEFLATED) as archive:',
-  '  for name in ("SKILL.md", "scripts/report.py"):',
-  '    info = zipfile.ZipInfo("report-format/" + name, (2026, 11, 17, 17, 9, 56))',
-  '    info.create_system = 3',
-  '    info.external_attr = 0o100644 << 16',
-  '    info.compress_type = zipfile.ZIP_DEFLATED',
-  '    archive.writestr(info, (source / name).read_bytes())',
-].join('\n'), join(root, 'src', 'capabilities', 'report-format'), skillZip])
-await cp(
-  join(root, 'vendor', 'tabulate-0.9.0-py3-none-any.whl'),
-  join(packages, 'tabulate-0.9.0-py3-none-any.whl'),
-)
 const officeSkillSource = join(root, 'src', 'capabilities', 'office-enhancement')
 const officeSkillBuild = join(work, 'office-skill-build')
 const officeSkillRoot = join(officeSkillBuild, 'office-enhancement-skill')
@@ -143,9 +127,6 @@ await cp(
 
 const artifacts = {
   bootstrap: await artifact(join(packages, packedBootstrap.filename)),
-  sysinfo: await artifact(join(packages, packedSysinfo.filename)),
-  skill: await artifact(skillZip),
-  python: await artifact(join(packages, 'tabulate-0.9.0-py3-none-any.whl')),
   officeSkill: await artifact(officeSkillZip),
   pypdf: await artifact(join(packages, 'pypdf-7.1.0-py3-none-any.whl')),
   core: await artifact(coreZip),
@@ -157,151 +138,6 @@ const catalog = {
   name: 'DSH rc.2 内网能力目录',
   generatedFor: 'dsh-v0.2.1-rc.2',
   items: [
-    {
-      id: 'report-format',
-      type: 'skill',
-      name: '报告格式',
-      version: '1.0.0',
-      description: '把结构化检查结果整理成可复核的中文报告，安装后由 DSH 技能注册表发现。',
-      compatibility: {
-        os: ['win32', 'darwin', 'linux'],
-        arch: ['x64', 'arm64'],
-        dsh: '0.2.1-rc.2',
-      },
-      artifact: {
-        path: 'packages/report-format-1.0.0.zip',
-        sha256: artifacts.skill.sha256,
-        bytes: artifacts.skill.bytes,
-      },
-      dependencies: [],
-      checks: [{ type: 'skill-discovery', name: 'report-format' }],
-      usage: {
-        steps: [
-          '安装后确认状态为“可使用”。',
-          '点击“试用”检查预填提示词，再由你手动发送。',
-          '“更多”中可检查修复或卸载；修改过的技能文件不会被误删。',
-        ],
-        inputs: '标题、负责人、带严重程度与说明的检查发现。',
-        output: '包含结论、发现、未验证项和下一步的中文报告。',
-        example: '把本地哈希校验结果整理为可复核报告。',
-      },
-      trial: {
-        prompt: `请使用已安装的 report-format 技能，把下面明确标注为示例的数据整理成中文报告。请包含结论、发现、未验证项和下一步，并说明这些是示例事实。
-
-示例事实：标题“内网能力中心”；负责人“本机 DSH”；两项检查分别为“目录哈希已校验”和“试用仅预填草稿”。`,
-      },
-    },
-    {
-      id: 'dsh-local-sysinfo',
-      type: 'plugin',
-      name: '本机系统信息',
-      version: '1.0.0',
-      description: '查询本机时间、全部网络接口、磁盘、内存与操作系统信息，部分失败会保留。',
-      compatibility: {
-        os: ['win32', 'darwin', 'linux'],
-        arch: ['x64', 'arm64'],
-        dsh: '0.2.1-rc.2',
-      },
-      artifact: {
-        path: `packages/${packedSysinfo.filename}`,
-        sha256: artifacts.sysinfo.sha256,
-        bytes: artifacts.sysinfo.bytes,
-      },
-      dependencies: [],
-      install: { packageName: 'dsh-local-sysinfo' },
-      checks: [{ type: 'named-tool-readonly-call', tool: 'get_local_system_info' }],
-      usage: {
-        steps: [
-          '安装后若提示等待重启，重启 DSH 再检查。',
-          '点击“试用”创建新会话并预填查询提示词。',
-          '检查后手动发送；数据不会上传到分发服务器。',
-        ],
-        inputs: '无需参数。',
-        output: '时间、网络、磁盘、内存、操作系统及部分采集错误。',
-        example: '查询当前电脑 IP、MAC、磁盘容量和内存。',
-      },
-      trial: {
-        prompt: `请使用 get_local_system_info 查询本机时间与时区、全部网络接口 IP/MAC、磁盘容量、内存和操作系统信息。
-
-请按总览、网络、存储、内存、系统与错误整理。不要上传机器信息。`,
-      },
-    },
-    {
-      id: 'python-tabulate',
-      type: 'python',
-      name: 'Tabulate',
-      version: '0.9.0',
-      description: '纯 Python 表格格式化库，使用 DSH Python 并与内置发行包隔离。',
-      compatibility: {
-        os: ['win32', 'darwin', 'linux'],
-        arch: ['x64', 'arm64'],
-        dsh: '0.2.1-rc.2',
-        python: '>=3.12.0 <3.13.0',
-      },
-      artifact: {
-        path: 'packages/tabulate-0.9.0-py3-none-any.whl',
-        sha256: artifacts.python.sha256,
-        bytes: artifacts.python.bytes,
-      },
-      dependencies: [],
-      install: {
-        distribution: 'tabulate',
-        module: 'tabulate',
-        wheelTag: 'py3-none-any',
-      },
-      checks: [
-        { type: 'python-import', module: 'tabulate', version: '0.9.0' },
-        { type: 'python-function', name: 'tabulate-table', module: 'tabulate' },
-      ],
-      usage: {
-        steps: [
-          '安装后由 DSH Python 真实导入 tabulate 0.9.0。',
-          '点击“试用”查看获取解释器和生成表格的提示词。',
-          '卸载只移除能力中心账本中的版本化文件和 .pth。',
-        ],
-        inputs: '需要格式化的表格记录。',
-        output: 'Python 路径、包版本和 grid 表格。',
-        example: '把三项能力与状态输出为 grid 表格。',
-      },
-      trial: {
-        prompt: `请调用 load_workspace_dependencies 获取当前 DSH 的真实 Python 解释器与 pythonPackages。
-
-使用该解释器导入 tabulate 0.9.0，以 grid 格式输出“能力/状态”三项记录，并显示 Python 路径与版本。`,
-      },
-    },
-    {
-      id: 'capability-starter-pack',
-      type: 'composite',
-      name: '入门能力组合',
-      version: '1.0.0',
-      description: '一次安装报告格式、本机系统信息和 Tabulate；依赖按固定版本与共享引用管理。',
-      compatibility: {
-        os: ['win32', 'darwin', 'linux'],
-        arch: ['x64', 'arm64'],
-        dsh: '0.2.1-rc.2',
-      },
-      dependencies: [
-        { id: 'report-format', version: '1.0.0' },
-        { id: 'dsh-local-sysinfo', version: '1.0.0' },
-        { id: 'python-tabulate', version: '0.9.0' },
-      ],
-      checks: [{ type: 'skill-discovery', name: 'report-format' }],
-      usage: {
-        steps: [
-          '安装组合能力会先校验三个子能力及其全部制品。',
-          '任一子能力被其他组合使用时，不会在卸载时被误删。',
-          '每个子能力仍可在列表中单独检查或试用。',
-        ],
-        inputs: '无额外输入。',
-        output: '三个固定版本能力及其本机账本记录。',
-        example: '首次部署 DSH 内网环境时一次安装基础能力。',
-      },
-      trial: {
-        prompt: `请先说明已安装的 report-format、dsh-local-sysinfo 和 python-tabulate 分别能在什么任务中使用。
-
-然后使用 report-format 生成一份简短的结构化使用说明。不要自动调用其他能力。`,
-      },
-    },
     {
       id: 'office-enhancement-skill',
       type: 'skill',

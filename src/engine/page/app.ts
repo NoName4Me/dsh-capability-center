@@ -6,46 +6,128 @@
   const OPEN_DRAFT = 'capability-center/open-draft';
   const OPEN_DRAFT_ACK = 'capability-center/open-draft-ack';
   const DRAFT_ACK_TIMEOUT_MS = 16_000;
+  type CapabilityType = keyof typeof TYPE_LABELS;
+  type Action = 'install' | 'update' | 'diagnose' | 'uninstall';
+
+  interface Capability {
+    id: string;
+    name: string;
+    version: string;
+    type: CapabilityType;
+    description: string;
+    hidden?: boolean;
+    delisted?: boolean;
+    artifact?: { path: string; sha256: string };
+    dependencies?: { id: string; version: string }[];
+    usage?: { steps?: string[]; inputs?: string; output?: string; example?: string };
+  }
+
+  interface LocalState {
+    installed?: boolean;
+    ready?: boolean;
+    currentVersion?: string | null;
+    detail?: string;
+    source?: string;
+    activation?: string;
+    legacy?: boolean;
+    preexisting?: boolean;
+  }
+
+  interface CoreStatus {
+    activeVersion?: string | null;
+    version?: string | null;
+    pending?: { version: string } | null;
+    error?: string;
+  }
+
+  interface CoreCheck {
+    updateAvailable: boolean;
+    latestVersion?: string;
+  }
+
+  interface StatusPayload {
+    catalog?: { name: string; items: Capability[] };
+    localStates?: Record<string, LocalState>;
+    online?: boolean;
+    onlineError?: string;
+    legacyManagerEnabled?: boolean;
+    recoveryRequired?: boolean;
+    recoveryMessages?: string[];
+    core?: CoreStatus;
+    preview?: boolean;
+  }
+
+  interface Operation {
+    action: Action;
+    status: string;
+    phase: string;
+    progress: number;
+    logs: { message: string }[];
+    terminal: boolean;
+    error?: string | null;
+  }
+
+  interface ItemStatus {
+    kind: 'idle' | 'ready' | 'warning';
+    label: string;
+    detail: string;
+  }
+
+  interface DraftAttempt {
+    status: 'pending' | 'success' | 'error';
+    message: string;
+  }
+
+  type Attribute = string | boolean | EventListener | null | undefined;
+
+  function requiredElement<T extends HTMLElement>(id: string, elementType: new () => T): T {
+    const element = document.getElementById(id);
+    if (!(element instanceof elementType)) throw new Error(`页面缺少元素 #${id}`);
+    return element;
+  }
+
   const state = {
-    catalog: [],
-    localStates: {},
+    catalog: [] as Capability[],
+    localStates: {} as Record<string, LocalState>,
     online: false,
-    onlineError: null,
+    preview: false,
+    onlineError: null as string | null,
     filter: 'all',
     query: '',
     loading: false,
-    error: null,
+    error: null as string | null,
     serverUrl: localStorage.getItem(STORAGE_KEY) || '',
-    operations: new Map(),
-    openItems: new Set(),
-    draftAttempts: new Map(),
-    pendingDraftRequests: new Map(),
-    core: null,
-    coreCheck: null,
+    operations: new Map<string, Operation>(),
+    openItems: new Set<string>(),
+    draftAttempts: new Map<string, DraftAttempt>(),
+    pendingDraftRequests: new Map<string, { itemId: string; timer: number }>(),
+    core: null as CoreStatus | null,
+    coreCheck: null as CoreCheck | null,
     coreBusy: false,
     migration: false,
     recoveryRequired: false,
-    recoveryMessages: [],
+    recoveryMessages: [] as string[],
   };
 
   const elements = {
-    sourceForm: document.getElementById('source-form'),
-    serverUrl: document.getElementById('server-url'),
-    connectButton: document.getElementById('connect-button'),
-    offlineButton: document.getElementById('offline-button'),
-    connection: document.getElementById('connection'),
-    connectionText: document.getElementById('connection-text'),
-    summary: document.getElementById('catalog-summary'),
-    statePanel: document.getElementById('state-panel'),
-    list: document.getElementById('capability-list'),
-    filters: document.getElementById('filters'),
-    search: document.getElementById('search-input'),
-    coreVersion: document.getElementById('core-version'),
-    coreCheck: document.getElementById('core-check'),
-    coreStage: document.getElementById('core-stage'),
-    coreNotice: document.getElementById('core-notice'),
-    migrationNotice: document.getElementById('migration-notice'),
-    recoveryNotice: document.getElementById('recovery-notice'),
+    sourceForm: requiredElement('source-form', HTMLFormElement),
+    serverUrl: requiredElement('server-url', HTMLInputElement),
+    connectButton: requiredElement('connect-button', HTMLButtonElement),
+    offlineButton: requiredElement('offline-button', HTMLButtonElement),
+    connection: requiredElement('connection', HTMLElement),
+    connectionText: requiredElement('connection-text', HTMLElement),
+    summary: requiredElement('catalog-summary', HTMLElement),
+    statePanel: requiredElement('state-panel', HTMLElement),
+    list: requiredElement('capability-list', HTMLElement),
+    filters: requiredElement('filters', HTMLElement),
+    search: requiredElement('search-input', HTMLInputElement),
+    coreVersion: requiredElement('core-version', HTMLElement),
+    coreCheck: requiredElement('core-check', HTMLButtonElement),
+    coreStage: requiredElement('core-stage', HTMLButtonElement),
+    coreNotice: requiredElement('core-notice', HTMLElement),
+    migrationNotice: requiredElement('migration-notice', HTMLElement),
+    previewNotice: requiredElement('preview-notice', HTMLElement),
+    recoveryNotice: requiredElement('recovery-notice', HTMLElement),
   };
 
   const HOST_TOKENS = [
@@ -102,33 +184,32 @@
     }
   }
 
-  function el(tag, attributes = {}, text = undefined) {
+  function el<K extends keyof HTMLElementTagNameMap>(tag: K, attributes: Record<string, Attribute> = {}, text?: string) {
     const node = document.createElement(tag);
     for (const [name, value] of Object.entries(attributes)) {
       if (value === undefined || value === null || value === false) continue;
-      if (name === 'className') node.className = value;
-      else if (name.startsWith('on')) node.addEventListener(name.slice(2).toLowerCase(), value);
-      else if (value === true) node.setAttribute(name, '');
-      else node.setAttribute(name, String(value));
+      if (typeof value === 'function') node.addEventListener(name.slice(2).toLowerCase(), value);
+      else node.setAttribute(name === 'className' ? 'class' : name, value === true ? '' : value);
     }
     if (text !== undefined) node.textContent = String(text);
     return node;
   }
 
-  function setConnection(kind, text) {
+  function setConnection(kind: string, text: string) {
     elements.connection.dataset.state = kind;
     elements.connectionText.textContent = text;
   }
 
-  function setLoading(loading) {
+  function setLoading(loading: boolean) {
     state.loading = loading;
-    elements.connectButton.disabled = loading;
-    elements.offlineButton.disabled = loading;
+    elements.connectButton.disabled = loading || state.preview;
+    elements.serverUrl.disabled = state.preview;
+    elements.offlineButton.disabled = loading || state.preview;
     elements.connectButton.textContent = loading ? '正在刷新' : '保存并刷新';
-    elements.coreCheck.disabled = loading || state.coreBusy || !state.serverUrl;
+    elements.coreCheck.disabled = state.preview || loading || state.coreBusy || !state.serverUrl;
   }
 
-  function showState(title, detail, kind = 'empty') {
+  function showState(title: string, detail: string, kind = 'empty') {
     elements.statePanel.hidden = false;
     elements.statePanel.dataset.state = kind;
     elements.statePanel.replaceChildren();
@@ -139,7 +220,7 @@
     elements.statePanel.append(mark, el('strong', {}, title), el('span', {}, detail));
   }
 
-  function parseVersion(value) {
+  function parseVersion(value: string) {
     const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?$/u.exec(String(value ?? ''));
     return match === null ? null : {
       numbers: [Number(match[1]), Number(match[2]), Number(match[3])],
@@ -147,7 +228,7 @@
     };
   }
 
-  function compareVersions(leftValue, rightValue) {
+  function compareVersions(leftValue: string, rightValue: string) {
     const left = parseVersion(leftValue);
     const right = parseVersion(rightValue);
     if (left === null || right === null) return 0;
@@ -160,7 +241,8 @@
     return left.prerelease.join('.').localeCompare(right.prerelease.join('.'));
   }
 
-  function applyPayload(payload) {
+  function applyPayload(payload: StatusPayload) {
+    state.preview = payload.preview === true;
     state.catalog = Array.isArray(payload.catalog?.items) ? payload.catalog.items : [];
     state.localStates = payload.localStates || {};
     state.online = payload.online === true;
@@ -169,13 +251,22 @@
     state.migration = payload.legacyManagerEnabled === true;
     state.recoveryRequired = payload.recoveryRequired === true;
     state.recoveryMessages = payload.recoveryMessages || [];
-    if (payload.core) state.core = { ...(state.core || {}), ...payload.core };
+    if (payload.core) state.core = { ...state.core, ...payload.core };
     const visibleCount = state.catalog.filter(item => item.hidden !== true).length;
     elements.summary.textContent = `${payload.catalog?.name || '能力目录'} · ${visibleCount} 项 · ${new Date().toLocaleTimeString('zh-CN', { hour12: false })} 更新`;
     renderStatusMessages();
   }
 
-  async function load(serverUrl) {
+  async function requestJson<T>(url: string, options?: RequestInit): Promise<T> {
+    const response = await fetch(url, options);
+    if (!response.ok) {
+      const error = await response.json().catch(() => null);
+      throw new Error(typeof error?.message === 'string' ? error.message : `HTTP ${response.status}`);
+    }
+    return await response.json() as T;
+  }
+
+  async function load(serverUrl: string) {
     state.loading = true;
     setLoading(true);
     setConnection('loading', '正在读取');
@@ -183,13 +274,11 @@
     elements.list.replaceChildren();
     try {
       const query = serverUrl ? `?server=${encodeURIComponent(serverUrl)}` : '';
-      const response = await fetch(`/capability-center/api/status${query}`, {
+      const payload = await requestJson<StatusPayload>(`/capability-center/api/status${query}`, {
         headers: { accept: 'application/json' },
       });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.message || `HTTP ${response.status}`);
       applyPayload(payload);
-      setConnection(state.online ? 'online' : 'offline', state.online ? '目录可用' : '本机账本');
+      setConnection(state.online ? 'online' : 'offline', state.preview ? '本地预览' : state.online ? '目录可用' : '本机账本');
       if (state.onlineError) showState('目录暂不可用', `${state.onlineError} 已安装能力仍可检查和卸载。`, 'empty');
     } catch (error) {
       state.error = error instanceof Error ? error.message : String(error);
@@ -205,7 +294,7 @@
     }
   }
 
-  async function submitServer(event) {
+  async function submitServer(event: SubmitEvent) {
     event?.preventDefault();
     const serverUrl = elements.serverUrl.value.trim();
     if (!serverUrl) {
@@ -223,11 +312,11 @@
     await load('');
   }
 
-  function localState(item) {
+  function localState(item: Capability): LocalState {
     return state.localStates[item.id] || {};
   }
 
-  function statusFor(item) {
+  function statusFor(item: Capability): ItemStatus {
     const local = localState(item);
     if (!local.installed) {
       if (item.delisted) return { kind: 'warning', label: '已下架', detail: '本机仍保留安装记录，可检查或卸载。' };
@@ -274,7 +363,7 @@
     for (const item of items) elements.list.append(renderItem(item));
   }
 
-  function primaryAction(item, status, busy) {
+  function primaryAction(item: Capability, status: ItemStatus, busy: boolean) {
     const local = localState(item);
     const operation = state.operations.get(item.id);
     if (busy) {
@@ -285,8 +374,8 @@
       return el('button', {
         className: 'button button-primary',
         type: 'button',
-        disabled: !state.online,
-        title: state.online ? '' : '安装需要先连接内网目录',
+        disabled: state.preview || !state.online,
+        title: state.preview ? '请在 DSH 内安装' : state.online ? '' : '安装需要先连接内网目录',
         onclick: () => runAction(item, 'install'),
       }, '安装');
     }
@@ -311,11 +400,11 @@
     }, '检查与修复');
   }
 
-  function renderItem(item) {
+  function renderItem(item: Capability) {
     const status = statusFor(item);
     const local = localState(item);
     const operation = state.operations.get(item.id);
-    const busy = operation && !operation.terminal;
+    const busy = operation !== undefined && !operation.terminal;
     const trialPending = state.draftAttempts.get(item.id)?.status === 'pending';
     const listItem = el('li', { className: 'capability-item', 'data-item-id': item.id });
     const row = el('div', { className: 'capability-row' });
@@ -385,7 +474,7 @@
     return listItem;
   }
 
-  function renderUsage(item) {
+  function renderUsage(item: Capability) {
     const usage = item.usage || {};
     const section = el('section', { className: 'usage-guide', 'aria-label': '使用说明' });
     section.append(el('h3', {}, '使用说明'));
@@ -400,7 +489,7 @@
     return section;
   }
 
-  function renderDetailGrid(item, status) {
+  function renderDetailGrid(item: Capability, status: ItemStatus) {
     const local = localState(item);
     const grid = el('dl', { className: 'detail-grid' });
     const values = [
@@ -417,7 +506,7 @@
     return grid;
   }
 
-  function renderDraftFeedback(itemId) {
+  function renderDraftFeedback(itemId: string) {
     const host = el('div', {
       className: 'draft-feedback-host',
       'data-draft-host': itemId,
@@ -428,7 +517,7 @@
     return host;
   }
 
-  function renderOperation(item, operation) {
+  function renderOperation(item: Capability, operation: Operation) {
     const root = el('section', {
       className: 'operation',
       'data-status': operation.status,
@@ -461,14 +550,14 @@
     return root;
   }
 
-  function detailsRoot(itemId) {
+  function detailsRoot(itemId: string) {
     return elements.list.querySelector(`[data-item-id="${itemId}"] [data-details-for="${itemId}"]`);
   }
 
-  async function runAction(item, action) {
+  async function runAction(item: Capability, action: Action) {
     const current = state.operations.get(item.id);
     if (current && !current.terminal) return;
-    const placeholder = {
+    const placeholder: Operation = {
       action,
       status: 'queued',
       phase: '正在提交',
@@ -481,7 +570,7 @@
     render();
     operationRoot(item.id)?.focus();
     try {
-      const response = await fetch(`/capability-center/api/actions/${action}`, {
+      const payload = await requestJson<{ operation: Operation & { id: string } }>(`/capability-center/api/actions/${action}`, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -489,8 +578,6 @@
         },
         body: JSON.stringify({ serverUrl: state.serverUrl, itemId: item.id }),
       });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.message || `HTTP ${response.status}`);
       state.operations.set(item.id, payload.operation);
       updateOperation(item, payload.operation);
       await pollOperation(item, payload.operation.id);
@@ -508,14 +595,12 @@
     }
   }
 
-  async function pollOperation(item, id) {
+  async function pollOperation(item: Capability, id: string) {
     while (true) {
       await new Promise(resolve => setTimeout(resolve, 500));
-      const response = await fetch(`/capability-center/api/operations/${encodeURIComponent(id)}`, {
+      const payload = await requestJson<{ operation: Operation }>(`/capability-center/api/operations/${encodeURIComponent(id)}`, {
         headers: { accept: 'application/json' },
       });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.message || `HTTP ${response.status}`);
       const operation = payload.operation;
       state.operations.set(item.id, operation);
       updateOperation(item, operation);
@@ -526,7 +611,7 @@
     }
   }
 
-  function updateOperation(item, operation) {
+  function updateOperation(item: Capability, operation: Operation) {
     const itemNode = elements.list.querySelector(`[data-item-id="${item.id}"]`);
     if (!itemNode || !operation) return;
     state.openItems.add(item.id);
@@ -534,8 +619,8 @@
     operationRoot(item.id)?.focus();
   }
 
-  function operationRoot(itemId) {
-    return elements.list.querySelector(`[data-item-id="${itemId}"] .operation`);
+  function operationRoot(itemId: string) {
+    return elements.list.querySelector<HTMLElement>(`[data-item-id="${itemId}"] .operation`);
   }
 
   function draftRequestId() {
@@ -546,13 +631,13 @@
     }
   }
 
-  function setDraftAttempt(itemId, attempt) {
+  function setDraftAttempt(itemId: string, attempt: DraftAttempt) {
     state.draftAttempts.set(itemId, attempt);
     updateDraftFeedback(itemId);
     render();
   }
 
-  function updateDraftFeedback(itemId) {
+  function updateDraftFeedback(itemId: string) {
     const host = elements.list.querySelector(`[data-draft-host="${itemId}"]`);
     if (!host) return;
     host.replaceChildren();
@@ -560,7 +645,7 @@
     if (attempt) host.append(el('div', { className: 'draft-feedback', 'data-state': attempt.status }, attempt.message));
   }
 
-  async function openTrialDraft(item) {
+  async function openTrialDraft(item: Capability) {
     const existing = state.draftAttempts.get(item.id);
     if (existing?.status === 'pending') return;
     if (window.parent === window) {
@@ -571,7 +656,7 @@
       return;
     }
     const requestId = draftRequestId();
-    const timer = setTimeout(() => {
+    const timer = window.setTimeout(() => {
       const pending = state.pendingDraftRequests.get(requestId);
       if (!pending) return;
       state.pendingDraftRequests.delete(requestId);
@@ -580,7 +665,7 @@
     state.pendingDraftRequests.set(requestId, { itemId: item.id, timer });
     setDraftAttempt(item.id, { status: 'pending', message: '正在验证试用提示词并新建 DSH 会话。' });
     try {
-      const response = await fetch('/capability-center/api/trials/prepare', {
+      const payload = await requestJson<{ prompt: string }>('/capability-center/api/trials/prepare', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -593,8 +678,6 @@
           source: 'capability-center-frame',
         }),
       });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.message || `HTTP ${response.status}`);
       window.parent.postMessage({
         type: OPEN_DRAFT,
         requestId,
@@ -612,13 +695,13 @@
     }
   }
 
-  function handleDraftAck(event) {
+  function handleDraftAck(event: MessageEvent<unknown>) {
     if (event.origin !== window.location.origin || event.source !== window.parent) return;
     const message = event.data;
     if (typeof message !== 'object' || message === null
-      || message.type !== OPEN_DRAFT_ACK
-      || typeof message.requestId !== 'string'
-      || typeof message.ok !== 'boolean') return;
+      || !('type' in message) || message.type !== OPEN_DRAFT_ACK
+      || !('requestId' in message) || typeof message.requestId !== 'string'
+      || !('ok' in message) || typeof message.ok !== 'boolean') return;
     const pending = state.pendingDraftRequests.get(message.requestId);
     if (!pending) return;
     clearTimeout(pending.timer);
@@ -630,13 +713,14 @@
       });
       return;
     }
-    const error = typeof message.error === 'string' && message.error.trim()
+    const error = 'error' in message && typeof message.error === 'string' && message.error.trim()
       ? message.error.trim().slice(0, 240)
       : 'DSH 未能创建新会话草稿。';
     setDraftAttempt(pending.itemId, { status: 'error', message: `试用未打开：${error}` });
   }
 
   function renderStatusMessages() {
+    elements.previewNotice.hidden = !state.preview;
     elements.migrationNotice.hidden = !state.migration;
     elements.recoveryNotice.hidden = !state.recoveryRequired;
     if (state.recoveryRequired) {
@@ -645,9 +729,9 @@
         el('span', {}, state.recoveryMessages.join('；') || '检测到未完成操作，已停止自动修改。'),
       );
     }
-    elements.coreVersion.textContent = state.core?.version ? `v${state.core.version}` : '不可用';
-    elements.coreCheck.disabled = state.loading || state.coreBusy || !state.serverUrl;
-    const check = state.coreCheck;
+    const activeVersion = state.core?.activeVersion ?? state.core?.version;
+    elements.coreVersion.textContent = activeVersion ? `v${activeVersion}` : '不可用';
+    elements.coreCheck.disabled = state.preview || state.loading || state.coreBusy || !state.serverUrl;
     const pending = state.core?.pending ?? null;
     if (pending?.version) {
       elements.coreNotice.hidden = false;
@@ -674,9 +758,7 @@
 
   async function loadCoreStatus() {
     try {
-      const response = await fetch('/capability-center/api/core/status', { headers: { accept: 'application/json' } });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.message || `HTTP ${response.status}`);
+      const payload = await requestJson<CoreStatus>('/capability-center/api/core/status', { headers: { accept: 'application/json' } });
       state.core = payload;
     } catch (error) {
       state.core = { version: null, error: error instanceof Error ? error.message : String(error) };
@@ -690,11 +772,9 @@
     elements.coreCheck.disabled = true;
     elements.coreCheck.textContent = '正在检查';
     try {
-      const response = await fetch(`/capability-center/api/core/check?server=${encodeURIComponent(state.serverUrl)}`, {
+      const payload = await requestJson<CoreCheck>(`/capability-center/api/core/check?server=${encodeURIComponent(state.serverUrl)}`, {
         headers: { accept: 'application/json' },
       });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.message || `HTTP ${response.status}`);
       state.coreCheck = payload;
     } catch (error) {
       state.coreCheck = null;
@@ -716,7 +796,7 @@
     state.coreBusy = true;
     renderStatusMessages();
     try {
-      const response = await fetch('/capability-center/api/core/stage', {
+      const payload = await requestJson<{ version: string }>('/capability-center/api/core/stage', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -724,10 +804,8 @@
         },
         body: JSON.stringify({ serverUrl: state.serverUrl }),
       });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.message || `HTTP ${response.status}`);
       await loadCoreStatus();
-      state.core.pending = { version: payload.version };
+      state.core = { ...state.core, pending: { version: payload.version } };
     } catch (error) {
       elements.coreNotice.hidden = false;
       elements.coreNotice.replaceChildren(
@@ -746,8 +824,9 @@
   elements.coreStage.addEventListener('click', stageCoreUpdate);
   window.addEventListener('message', handleDraftAck);
   elements.filters.addEventListener('click', event => {
-    const button = event.target.closest('[data-filter]');
-    if (!button) return;
+    if (!(event.target instanceof Element)) return;
+    const button = event.target.closest<HTMLButtonElement>('[data-filter]');
+    if (!button?.dataset.filter) return;
     state.filter = button.dataset.filter;
     for (const candidate of elements.filters.querySelectorAll('[data-filter]')) {
       candidate.setAttribute('aria-pressed', String(candidate === button));

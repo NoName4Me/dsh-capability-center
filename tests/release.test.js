@@ -51,31 +51,25 @@ test('offline archive is complete, contains current release metadata, and landin
     'capability-center/index.html',
     'capability-center/start-server.py',
     'capability-center/start-server.cmd',
-    'capability-center/packages/capability-center-0.2.2.tgz',
-    'capability-center/packages/dsh-local-sysinfo-1.0.0.tgz',
+    'capability-center/packages/capability-center-0.2.3.tgz',
     'capability-center/packages/office-enhancement-skill-1.0.0.zip',
     'capability-center/packages/pypdf-7.1.0-py3-none-any.whl',
-    'capability-center/packages/report-format-1.0.0.zip',
-    'capability-center/packages/tabulate-0.9.0-py3-none-any.whl',
-    'capability-center/core/capability-center-core-0.2.2.zip',
+    'capability-center/core/capability-center-core-0.2.3.zip',
   ]) {
     assert.ok(names.includes(required), `offline archive is missing ${required}`)
   }
   assert.equal(names.some(name => /(__pycache__|\.pyc$)/u.test(name)), false)
   assert.equal(names.some(name => /capability-center-(?:core-)?0\.2\.1\.(?:zip|tgz)$/u.test(name)), false)
-  for (const [name, digest] of [
-    ['capability-center/packages/report-format-1.0.0.zip', '63711abf784bd6af2cf1b639f6b5cb8fc7459739142c6b7a5b118cdd9c6de983'],
-    ['capability-center/packages/dsh-local-sysinfo-1.0.0.tgz', 'c1f39c7e93257d03bc0a263fbf0d2a15b0ee462ea1a99d8c9f7a29deec3dbc51'],
-    ['capability-center/packages/tabulate-0.9.0-py3-none-any.whl', '024ca478df22e9340661486f85298cff5f6dcdba14f3813e8830015b9ed1948f'],
-  ]) {
-    assert.equal(sha256(archive.get(name)), digest, `${name} changed`)
-  }
+  assert.equal(names.some(name => /report-format|dsh-local-sysinfo|tabulate/u.test(name)), false)
+  const catalog = JSON.parse(archive.get('capability-center/catalog.json').toString('utf8'))
+  assert.deepEqual(catalog.items.map(item => item.id).sort(), [
+    'office-enhancement', 'office-enhancement-skill', 'python-pypdf',
+  ])
   const landing = archive.get('capability-center/index.html').toString('utf8')
   assert.doesNotMatch(landing, /\{\{BOOTSTRAP_URL\}\}/u)
-  assert.match(landing, /capability-center-0\.2\.2\.tgz/u)
+  assert.match(landing, /capability-center-0\.2\.3\.tgz/u)
   const registry = JSON.parse(archive.get('capability-center/publication-registry.json').toString('utf8'))
-  assert.equal(registry.entries['report-format@1.0.0'].kind, 'capability')
-  assert.equal(registry.entries['core@0.2.2'].kind, 'core')
+  assert.equal(registry.entries['core@0.2.3'].kind, 'core')
   assert.equal(registry.entries['office-enhancement@1.0.0'].type, 'composite')
   assert.equal(registry.entries['python-pypdf@7.1.0'].type, 'python')
 })
@@ -88,15 +82,15 @@ test('publisher rejects same-version content changes and accepts a new immutable
     const catalogPath = join(storage, 'catalog.json')
     const original = JSON.parse(await readFile(catalogPath, 'utf8'))
     const changedCatalog = structuredClone(original)
-    const report = changedCatalog.items.find(item => item.id === 'report-format')
+    const skill = changedCatalog.items.find(item => item.id === 'office-enhancement-skill')
     const changedBytes = await readFile(await createSkillArchive(
-      join(storage, 'packages', 'report-format-1.0.0.zip'),
-      'report-format',
+      join(storage, 'packages', 'office-enhancement-skill-1.0.0.zip'),
+      'office-enhancement-skill',
       '1.0.0',
       'changed immutable content',
     ))
-    report.artifact.sha256 = sha256(changedBytes)
-    report.artifact.bytes = changedBytes.byteLength
+    skill.artifact.sha256 = sha256(changedBytes)
+    skill.artifact.bytes = changedBytes.byteLength
     await writeFile(catalogPath, `${JSON.stringify(changedCatalog, null, 2)}\n`)
     await assert.rejects(
       runFile(process.execPath, [
@@ -111,14 +105,14 @@ test('publisher rejects same-version content changes and accepts a new immutable
     )
 
     const nextBytes = await readFile(await createSkillArchive(
-      join(storage, 'packages', 'report-format-1.1.0.zip'),
-      'report-format',
+      join(storage, 'packages', 'office-enhancement-skill-1.1.0.zip'),
+      'office-enhancement-skill',
       '1.1.0',
     ))
-    const next = structuredClone(report)
+    const next = structuredClone(skill)
     next.version = '1.1.0'
     next.artifact = {
-      path: 'packages/report-format-1.1.0.zip',
+      path: 'packages/office-enhancement-skill-1.1.0.zip',
       sha256: sha256(nextBytes),
       bytes: nextBytes.byteLength,
     }
@@ -138,8 +132,8 @@ test('publisher rejects same-version content changes and accepts a new immutable
     ])
     assert.match(stdout, /published/u)
     const registry = JSON.parse(await readFile(join(storage, 'publication-registry.json'), 'utf8'))
-    assert.ok(registry.entries['report-format@1.0.0'])
-    assert.ok(registry.entries['report-format@1.1.0'])
+    assert.ok(registry.entries['office-enhancement-skill@1.0.0'])
+    assert.ok(registry.entries['office-enhancement-skill@1.1.0'])
   } finally {
     await rm(temp, { recursive: true, force: true })
   }
@@ -180,7 +174,7 @@ test('read-only distribution server serves built assets, HEAD, immutable paths, 
     const catalog = await httpGet(`${base}catalog.json`)
     assert.equal(catalog.status, 200)
     assert.match(catalog.headers['content-type'], /application\/json/u)
-    const head = await httpGet(`${base}packages/capability-center-0.2.2.tgz`, 'HEAD')
+    const head = await httpGet(`${base}packages/capability-center-0.2.3.tgz`, 'HEAD')
     assert.equal(head.status, 200)
     assert.ok(Number(head.headers['content-length']) > 10_000)
     assert.match(head.headers['cache-control'], /immutable/u)

@@ -20,8 +20,6 @@ import {
   catalog,
   createSkillArchive,
   createVenv,
-  dist,
-  distributionServer,
   fakeContext,
   flatComposite,
   python,
@@ -68,6 +66,30 @@ async function wait(service, operation) {
 
 async function installFull(service, base, id) {
   return await wait(service, service.startAction(base, id, 'install'))
+}
+
+const tabulatePath = 'packages/tabulate-0.9.0-py3-none-any.whl'
+
+async function tabulateFixture() {
+  return await readFile(join(root, 'tests', 'fixtures', 'tabulate-0.9.0-py3-none-any.whl'))
+}
+
+async function reportSkillFixture(directory) {
+  return await readFile(await createSkillArchive(
+    join(directory, 'report-format-1.0.0.zip'),
+    'report-format',
+    '1.0.0',
+    '报告格式',
+  ))
+}
+
+async function reportServer(directory) {
+  const path = 'packages/report-format-1.0.0.zip'
+  const bytes = await reportSkillFixture(directory)
+  return await startFileServer([
+    ['/catalog.json', catalog([skillItem('report-format', '1.0.0', path, bytes)])],
+    [`/${path}`, bytes],
+  ])
 }
 
 test('ledger protects prototype IDs and recovery rolls back a write before commit marker', async () => {
@@ -150,7 +172,7 @@ test('unreadable operation journal survives restart and blocks further writes', 
 
 test('fresh-home skill install and uninstall use real artifacts and leave no parent-path failure', async () => {
   const home = await tempRoot('capability-center-fresh-skill-')
-  const server = await distributionServer()
+  const server = await reportServer(home)
   const context = fakeContext({ skills: runtimeSkills() })
   const service = serviceFor(home, context, { http: (await import('../src/bootstrap/lib/http-transport.js')).readBoundedUrl })
   try {
@@ -375,7 +397,7 @@ test('ordinary installed skills update from 1.0.0 to 1.1.0 and replace their own
 
 test('delisted and fully offline installed skills remain visible, diagnosable, and uninstallable', async () => {
   const home = await tempRoot('capability-center-offline-')
-  const server = await distributionServer()
+  const server = await reportServer(home)
   const skills = runtimeSkills()
   const service = serviceFor(home, fakeContext({ skills }))
   try {
@@ -478,7 +500,7 @@ test('diagnose, trial, and uninstall use the installed manifest when the catalog
   }
 })
 
-// Recreate the v0.1.2 on-disk format using the original samples.
+// Recreate the v0.1.2 on-disk format using test fixtures.
 async function writeLegacyFixture(home, archive, receipt) {
   const records = []
   for (const [path, content] of readZip(archive)) {
@@ -499,7 +521,7 @@ test('v0.1.2-format receipts migrate for offline inspect, diagnosis, and safe un
   const temp = await tempRoot('capability-center-legacy-real-')
   const skillHome = join(temp, 'skill-home')
   const pythonHome = join(temp, 'python-home')
-  const skillBytes = await readFile(join(dist, 'packages', 'report-format-1.0.0.zip'))
+  const skillBytes = await reportSkillFixture(temp)
   await writeLegacyFixture(skillHome, skillBytes, {
     id: 'report-format',
     type: 'skill',
@@ -561,7 +583,7 @@ test('v0.1.2-format receipts migrate for offline inspect, diagnosis, and safe un
   })
 
   const runtime = await createVenv(join(temp, 'legacy-venv'))
-  const wheel = await readFile(join(dist, 'packages', 'tabulate-0.9.0-py3-none-any.whl'))
+  const wheel = await tabulateFixture()
   await writeLegacyFixture(pythonHome, wheel, {
     id: 'python-tabulate',
     type: 'python',
@@ -611,7 +633,7 @@ test('v0.1.2-format receipts migrate for offline inspect, diagnosis, and safe un
 
 test('a center-managed install uninstalled while an old receipt remains stays absent after restart', async () => {
   const home = await tempRoot('capability-center-new-install-stale-receipt-')
-  const server = await distributionServer()
+  const server = await reportServer(home)
   const service = serviceFor(home, fakeContext({ skills: runtimeSkills() }))
   const receiptPath = join(home, 'capability-center', 'installed', 'report-format.json')
   try {
@@ -832,7 +854,19 @@ test('actual Python 3.12 isolated venv installs, checks, imports, and uninstalls
   const home = join(temp, 'home')
   const runtime = await createVenv(join(temp, 'venv'))
   assert.match(runtime.version, /^3\.12\./u)
-  const server = await distributionServer()
+  const wheel = await tabulateFixture()
+  const item = {
+    ...skillItem('python-tabulate', '0.9.0', tabulatePath, wheel, [
+      { type: 'python-import', module: 'tabulate', version: '0.9.0' },
+      { type: 'python-function', name: 'tabulate-table', module: 'tabulate' },
+    ]),
+    type: 'python',
+    install: { distribution: 'tabulate', module: 'tabulate', wheelTag: 'py3-none-any' },
+  }
+  const server = await startFileServer([
+    ['/catalog.json', catalog([item])],
+    [`/${tabulatePath}`, wheel],
+  ])
   const service = serviceFor(home, fakeContext({ runtime }))
   try {
     await service.initialize()

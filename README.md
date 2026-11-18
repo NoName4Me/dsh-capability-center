@@ -1,20 +1,40 @@
-# DSH 能力中心 0.2.2
+# DSH 能力中心 0.2.3
 
 面向 DSH `0.2.1-rc.2` 的只读内网能力分发中心。它管理技能、DSH 插件、纯 Python 库和平面组合能力，不要求账号、凭据或模型调用。安装只使用目录声明的本地制品、固定版本和 SHA-256。
 
-`0.2.2` 是能力中心核心与工作区版本。技能复用的目标宿主仍是 DSH `0.2.1-rc.2`，不要把“能力中心核心 0.2.2”误认为“DSH 0.2.2”。
+当前能力中心版本为 `0.2.3`，目标宿主为 DSH `0.2.1-rc.2`。
 
 [项目文档索引](docs/README.md)
+
+## 本地预览 UI
+
+在源码仓库根目录运行以下命令。需要 Node.js 22 或更新版本，以及 PATH 中的 `python3`。也可以用 `CAPABILITY_CENTER_BUILD_PYTHON` 指定构建用的 Python。
+
+```sh
+npm ci
+npm run dev
+```
+
+打开 [能力中心本地预览](http://127.0.0.1:4173/capability-center/)。预览使用当前构建的真实页面和目录，可以搜索、筛选和查看详情。修改源码后，按 Ctrl+C 停止，再运行 `npm run dev`。端口可通过 `CAPABILITY_CENTER_PREVIEW_PORT` 指定。
+
+页面交互源码位于 [app.ts](src/engine/page/app.ts)。`npm run typecheck` 运行 TypeScript 严格类型检查，构建时会编译出 DSH 加载的 `page/app.js`。
+
+需要实际安装、卸载、试用或检查核心更新时，在预览构建完成后，另开终端运行：
+
+```sh
+python3 dist/start-server.py --host 127.0.0.1 --port 8765
+```
+
+首次使用时，在 DSH 的“插件 → 添加插件”粘贴终端打印的 `Initial plugin URL`，启用插件并按提示重启。在 DSH 侧栏打开“能力中心”，填入 `http://127.0.0.1:8765/` 并刷新。已安装稳定引导插件时，也可在页面检查并准备新核心，重启 DSH 后生效。
 
 ## 离线包内容
 
 `capability-center-offline.zip` 解压后得到完整分发目录 `capability-center/`：
 
-- `packages/capability-center-0.2.2.tgz`：稳定引导插件，首次通过 DSH“插件 → 添加插件”安装。
-- `core/capability-center-core-0.2.2.zip`：当前可替换核心，包含隐藏组件过滤、组件直接动作保护和固定 Office 自动检查。
+- `packages/capability-center-0.2.3.tgz`：稳定引导插件，首次通过 DSH“插件 → 添加插件”安装。
+- `core/capability-center-core-0.2.3.zip`：当前可替换核心，包含隐藏组件过滤、组件直接动作保护和固定 Office 自动检查。
 - `packages/office-enhancement-skill-1.0.0.zip`：Office 增强的隐藏技能，只包含固定的 `office_tools.py`、`office_smoke.py`、许可证和 provenance。
 - `packages/pypdf-7.1.0-py3-none-any.whl`：官方 PyPI 纯 Python wheel，作为 PDF 隐藏组件。
-- `packages/dsh-local-sysinfo-1.0.0.tgz`、`report-format-1.0.0.zip`、`tabulate-0.9.0-py3-none-any.whl`：当前分发包提供的示例能力。
 - `catalog.json`、`core-release-index.json`、`artifact-manifest.json`、`publication-registry.json`：固定目录、核心索引、当前制品清单和发布校验记录。
 - `start-server.cmd`、`start-server.py`：只读分发服务。
 
@@ -28,24 +48,28 @@
    ```
 
 3. 在 DSH 中打开“插件 → 添加插件”，粘贴服务打印的 `Initial plugin URL`。
-4. 安装并启用 `capability-center-0.2.2.tgz`，根据 DSH 返回结果重启。
+4. 安装并启用 `capability-center-0.2.3.tgz`，根据 DSH 返回结果重启。
 5. 打开侧栏“能力中心”，填写分发基础地址，例如 `http://192.168.1.20:8765/`。
 
 分发服务没有登录、上传接口或写接口。请用防火墙限制到公司内网，并为分发机配置稳定地址。
 
 ### 从能力中心 0.2.1 升级
 
-`0.2.2` 目录包含新的固定 `office-smoke` 检查。`0.2.1` 核心会按设计拒绝加载这个新目录，因此旧页面的能力列表暂时无法打开；这是 fail-closed，避免旧核心跳过 Office 固定检查、所有权借用或回滚逻辑后仍安装能力。
+从 `0.2.2` 开始，目录包含固定的 `office-smoke` 检查。`0.2.1` 核心会按设计拒绝加载这个新目录，因此旧页面的能力列表暂时无法打开；这是 fail-closed，避免旧核心跳过 Office 固定检查、所有权借用或回滚逻辑后仍安装能力。
 
 旧核心仍可独立读取 `core-release-index.json` 并更新自身，不需要先打开目录。按以下顺序升级：
 
 1. 保持 `0.2.1` 页面和分发服务可用，在“能力中心”中填写分发地址。
 2. 点“检查更新”。即使能力目录显示校验失败，顶部核心检查仍会读取独立的核心发布索引。
-3. 点“准备更新”。确认提示显示“核心 v0.2.2 已准备更新”；这一步只下载、校验并持久化核心，不打断当前任务。
-4. 重启 DSH。启动监督器会激活 `0.2.2`；启动失败时会回退上一健康核心。
-5. 重新打开“能力中心”，确认核心为 `v0.2.2`，再刷新目录并按需安装“Office 增强”。
+3. 点“准备更新”。确认提示显示“核心 v0.2.3 已准备更新”；这一步只下载、校验并持久化核心，不打断当前任务。
+4. 重启 DSH。启动监督器会激活 `0.2.3`；启动失败时会回退上一健康核心。
+5. 重新打开“能力中心”，确认核心为 `v0.2.3`，再刷新目录并按需安装“Office 增强”。
 
-稳定的 `capability-center` 引导插件无需随本次核心更新替换。若环境中的引导过旧、没有核心更新控件，可直接在 DSH“插件 → 添加插件”安装 `packages/capability-center-0.2.2.tgz`，再启动分发服务。
+稳定的 `capability-center` 引导插件无需随本次核心更新替换。若环境中的引导过旧、没有核心更新控件，可直接在 DSH“插件 → 添加插件”安装 `packages/capability-center-0.2.3.tgz`，再启动分发服务。
+
+### 管理已下架的示例能力
+
+自 `0.2.3` 起，新目录和离线包已移除报告格式、本机系统信息、Tabulate 及其入门组合。原有受管安装仍可通过本机账本查看、检查和卸载。
 
 ### 从旧管理器迁移
 
@@ -116,15 +140,15 @@ pypdf 固定为官方 PyPI `pypdf-7.1.0-py3-none-any.whl`，SHA-256 为 `47cca6b
 在完整源码工作区中构建。构建根据源码和固定离线依赖生成当前版本的核心、引导插件和能力制品，先验证目录图与制品哈希，再以固定 ZIP 时间戳生成离线包。新核心和 Office 技能 ZIP 使用排序路径、固定时间戳和固定权限位，重复构建应得到相同摘要。
 
 ```sh
-CAPABILITY_CENTER_BUILD_PYTHON=/path/to/python3 \
-  /path/to/node build.mjs
+npm ci
+CAPABILITY_CENTER_BUILD_PYTHON=/path/to/python3 npm run build
 ```
 
 作者侧 CLI 必须从源码工程 `capability-center/` 根目录运行，因为源码工程包含 `tools/` 和 `src/`。发布完成后，将更新后的 `dist/` 目录整体复制到内网分发机；离线 ZIP 只包含分发目录的内容，不包含作者侧工具。
 
 ```sh
 node tools/publish.mjs catalog --storage dist --catalog dist/catalog.json
-node tools/publish.mjs core --storage dist --archive dist/core/capability-center-core-0.2.2.zip
+node tools/publish.mjs core --storage dist --archive dist/core/capability-center-core-0.2.3.zip
 ```
 
 历史离线 ZIP 由 GitHub Releases 按版本保留。作者工具对同一个分发目录以 `publication-registry.json` 校验同版本制品一致性。修改已发布的能力制品时，请提升其版本。

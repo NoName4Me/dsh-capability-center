@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "capability-center-core",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "protocolVersion": 1,
   "entry": "engine/index.js",
   "compatibility": {

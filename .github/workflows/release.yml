@@ -32,6 +32,7 @@ jobs:
         run: |
           export CAPABILITY_CENTER_BUILD_PYTHON="$(command -v python)"
           export CAPABILITY_CENTER_TEST_PYTHON="$CAPABILITY_CENTER_BUILD_PYTHON"
+          npm ci
           npm test
           sha256sum capability-center-offline.zip > capability-center-offline.zip.sha256
       - name: 发布到 GitHub Releases

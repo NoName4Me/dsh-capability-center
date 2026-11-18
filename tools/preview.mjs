@@ -1,0 +1,50 @@
+import { readFile } from 'node:fs/promises'
+import { createServer } from 'node:http'
+import { readZip } from '../src/engine/lib/archive.js'
+
+const prefix = '/capability-center'
+const host = '127.0.0.1'
+const port = Number(process.env.CAPABILITY_CENTER_PREVIEW_PORT ?? 4173)
+const readProjectFile = path => readFile(new URL(path, import.meta.url))
+
+const [manifest, catalog] = await Promise.all([
+  readProjectFile('../src/engine/manifest.json').then(JSON.parse),
+  readProjectFile('../dist/catalog.json').then(JSON.parse),
+])
+const { version } = manifest
+const core = { activeVersion: version, version }
+const pages = readZip(await readProjectFile(`../dist/core/capability-center-core-${version}.zip`))
+const json = 'application/json; charset=utf-8'
+const routes = new Map([
+  [prefix + '/', ['text/html; charset=utf-8', pages.get('page/index.html')]],
+  [prefix + '/styles.css', ['text/css; charset=utf-8', pages.get('page/styles.css')]],
+  [prefix + '/app.js', ['text/javascript; charset=utf-8', pages.get('page/app.js')]],
+  [prefix + '/api/core/status', [json, JSON.stringify(core)]],
+  [prefix + '/api/status', [json, JSON.stringify({
+    catalog, core, online: true, preview: true, localStates: {},
+  })]],
+])
+
+createServer((req, res) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.writeHead(405, { allow: 'GET, HEAD', 'content-type': json })
+    res.end(JSON.stringify({ message: '请在 DSH 内执行此操作。' }))
+    return
+  }
+
+  const path = new URL(req.url, `http://${host}`).pathname
+  if (path === '/' || path === prefix) {
+    res.writeHead(302, { location: prefix + '/' }).end()
+    return
+  }
+  const route = routes.get(path)
+  if (!route) {
+    res.writeHead(404).end()
+    return
+  }
+  const [contentType, body] = route
+  res.writeHead(200, { 'content-type': contentType, 'cache-control': 'no-store' })
+  res.end(req.method === 'HEAD' ? undefined : body)
+}).listen(port, host, function () {
+  console.log(`能力中心本地预览 http://${host}:${this.address().port}${prefix}/`)
+})

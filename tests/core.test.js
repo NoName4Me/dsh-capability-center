@@ -343,7 +343,8 @@ test('actual built core ZIP serves its UI from the release-root page directory',
   const temp = await tempRoot('capability-center-built-core-page-')
   const home = join(temp, 'home')
   try {
-    const files = readZip(await readFile(join(dist, 'core', 'capability-center-core-0.2.2.zip')))
+    const files = readZip(await readFile(join(dist, 'core', 'capability-center-core-0.2.3.zip')))
+    assert.equal([...files.keys()].some(name => name.endsWith('.ts')), false)
     const coreRoot = join(temp, 'release')
     for (const [name, bytes] of files) {
       const target = join(coreRoot, ...name.split('/'))
@@ -375,7 +376,7 @@ test('actual built core ZIP serves its UI from the release-root page directory',
     await withHome(home, async () => {
       await module.apply(ctx, {
         runtime: {
-          version: '0.2.2',
+          version: '0.2.3',
           dataRoot: join(home, 'capability-center'),
           http: { readBoundedUrl },
           setEngine(value) { engine = value },

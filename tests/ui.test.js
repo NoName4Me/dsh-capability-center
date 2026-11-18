@@ -148,7 +148,7 @@ test('client bridge creates a fresh DSH chat with a prefilled prompt and never s
   const message = {
     type: 'capability-center/open-draft',
     requestId: 'request_12345678',
-    itemId: 'report-format',
+    itemId: 'office-enhancement',
     prompt,
     origin: 'https://dsh.local',
   }
@@ -184,7 +184,7 @@ test('client bridge creates a fresh DSH chat with a prefilled prompt and never s
 test('UI source exposes required filters, contextual actions, core-pending notice, and DeepSeek blue styling', async () => {
   const [html, app, css] = await Promise.all([
     readFile(join(root, 'src', 'engine', 'page', 'index.html'), 'utf8'),
-    readFile(join(root, 'src', 'engine', 'page', 'app.js'), 'utf8'),
+    readFile(join(root, 'src', 'engine', 'page', 'app.ts'), 'utf8'),
     readFile(join(root, 'src', 'engine', 'page', 'styles.css'), 'utf8'),
   ])
   for (const label of ['全部', '技能', '插件', 'Python 库', '组合', '已安装']) {
