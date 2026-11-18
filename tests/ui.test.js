@@ -181,19 +181,30 @@ test('client bridge creates a fresh DSH chat with a prefilled prompt and never s
   for (const cleanup of cleanups.reverse()) await cleanup?.()
 })
 
-test('UI source exposes required filters, contextual actions, core-pending notice, and DeepSeek blue styling', async () => {
+test('UI source exposes category filters, card details, update results and offline management', async () => {
   const [html, app, css] = await Promise.all([
     readFile(join(root, 'src', 'engine', 'page', 'index.html'), 'utf8'),
     readFile(join(root, 'src', 'engine', 'page', 'app.ts'), 'utf8'),
     readFile(join(root, 'src', 'engine', 'page', 'styles.css'), 'utf8'),
   ])
-  for (const label of ['全部', '技能', '插件', 'Python 库', '组合', '已安装']) {
+  for (const label of ['全部', '技能', '插件', 'Python 库', '能力包', '已安装']) {
     assert.match(html, new RegExp(`>${label}<`, 'u'))
   }
   assert.match(app, /检查与修复/u)
   assert.match(app, /卸载/u)
-  assert.match(app, /详情/u)
-  assert.match(app, /核心 v\$\{pending\.version\} 已准备更新/u)
+  assert.match(html, /关闭详情/u)
+  assert.match(app, /重启 DSH 后更新到 v\$\{pending\.version\}/u)
+  assert.match(app, /已是最新版本/u)
+  assert.match(app, /分发服务器没有兼容版本/u)
+  assert.match(html, /<dialog[^>]+aria-labelledby="capability-dialog-title"/u)
+  assert.match(html, /<form method="dialog">/u)
+  assert.match(app, /detailDialog\.showModal\(\)/u)
+  assert.match(app, /renderActions\(item, status, 'card'\)/u)
+  assert.match(app, /capability-card-body/u)
+  assert.match(app, /trialAvailable !== false/u)
+  assert.match(app, /label: '已安装'/u)
+  assert.match(app, /state\.localOnly \? '' : state\.serverUrl/u)
+  assert.match(css, /\.capability-list\s*\{[^}]*grid-template-columns: repeat\(auto-fill/u)
   assert.match(app, /草稿尚未发送/u)
   assert.match(app, /legacyManagerEnabled/u)
   assert.match(app, /local\.preexisting/u)

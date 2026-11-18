@@ -51,10 +51,11 @@ test('offline archive is complete, contains current release metadata, and landin
     'capability-center/index.html',
     'capability-center/start-server.py',
     'capability-center/start-server.cmd',
-    'capability-center/packages/capability-center-0.2.3.tgz',
+    'capability-center/packages/capability-center-0.2.6.tgz',
+    'capability-center/packages/dsh-intranet-auto-continue-1.1.0.tgz',
     'capability-center/packages/office-enhancement-skill-1.0.0.zip',
     'capability-center/packages/pypdf-7.1.0-py3-none-any.whl',
-    'capability-center/core/capability-center-core-0.2.3.zip',
+    'capability-center/core/capability-center-core-0.2.6.zip',
   ]) {
     assert.ok(names.includes(required), `offline archive is missing ${required}`)
   }
@@ -63,13 +64,14 @@ test('offline archive is complete, contains current release metadata, and landin
   assert.equal(names.some(name => /report-format|dsh-local-sysinfo|tabulate/u.test(name)), false)
   const catalog = JSON.parse(archive.get('capability-center/catalog.json').toString('utf8'))
   assert.deepEqual(catalog.items.map(item => item.id).sort(), [
-    'office-enhancement', 'office-enhancement-skill', 'python-pypdf',
+    'dsh-intranet-auto-continue', 'office-enhancement', 'office-enhancement-skill', 'python-pypdf',
   ])
   const landing = archive.get('capability-center/index.html').toString('utf8')
   assert.doesNotMatch(landing, /\{\{BOOTSTRAP_URL\}\}/u)
-  assert.match(landing, /capability-center-0\.2\.3\.tgz/u)
+  assert.match(landing, /capability-center-0\.2\.6\.tgz/u)
   const registry = JSON.parse(archive.get('capability-center/publication-registry.json').toString('utf8'))
-  assert.equal(registry.entries['core@0.2.3'].kind, 'core')
+  assert.equal(registry.entries['core@0.2.6'].kind, 'core')
+  assert.equal(registry.entries['dsh-intranet-auto-continue@1.1.0'].type, 'plugin')
   assert.equal(registry.entries['office-enhancement@1.0.0'].type, 'composite')
   assert.equal(registry.entries['python-pypdf@7.1.0'].type, 'python')
 })
@@ -174,7 +176,7 @@ test('read-only distribution server serves built assets, HEAD, immutable paths, 
     const catalog = await httpGet(`${base}catalog.json`)
     assert.equal(catalog.status, 200)
     assert.match(catalog.headers['content-type'], /application\/json/u)
-    const head = await httpGet(`${base}packages/capability-center-0.2.3.tgz`, 'HEAD')
+    const head = await httpGet(`${base}packages/capability-center-0.2.6.tgz`, 'HEAD')
     assert.equal(head.status, 200)
     assert.ok(Number(head.headers['content-length']) > 10_000)
     assert.match(head.headers['cache-control'], /immutable/u)

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Automatic continuation",
+    "description": "Continues after recoverable interruptions, with configurable limits, session pauses, and recent activity."
+  }
+}

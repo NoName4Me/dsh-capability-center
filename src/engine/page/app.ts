@@ -2,7 +2,7 @@
   'use strict';
 
   const STORAGE_KEY = 'capability-center.serverUrl';
-  const TYPE_LABELS = { skill: '技能', plugin: '插件', python: 'Python 库', composite: '组合' };
+  const TYPE_LABELS = { skill: '技能', plugin: '插件', python: 'Python 库', composite: '能力包' };
   const OPEN_DRAFT = 'capability-center/open-draft';
   const OPEN_DRAFT_ACK = 'capability-center/open-draft-ack';
   const DRAFT_ACK_TIMEOUT_MS = 16_000;
@@ -16,6 +16,8 @@
     type: CapabilityType;
     description: string;
     hidden?: boolean;
+    trialAvailable?: boolean;
+    trial?: { prompt?: string };
     delisted?: boolean;
     artifact?: { path: string; sha256: string };
     dependencies?: { id: string; version: string }[];
@@ -42,7 +44,8 @@
 
   interface CoreCheck {
     updateAvailable: boolean;
-    latestVersion?: string;
+    currentVersion: string;
+    latestVersion: string | null;
   }
 
   interface StatusPayload {
@@ -90,6 +93,7 @@
     catalog: [] as Capability[],
     localStates: {} as Record<string, LocalState>,
     online: false,
+    localOnly: false,
     preview: false,
     onlineError: null as string | null,
     filter: 'all',
@@ -98,12 +102,13 @@
     error: null as string | null,
     serverUrl: localStorage.getItem(STORAGE_KEY) || '',
     operations: new Map<string, Operation>(),
-    openItems: new Set<string>(),
+    detailItemId: null as string | null,
     draftAttempts: new Map<string, DraftAttempt>(),
     pendingDraftRequests: new Map<string, { itemId: string; timer: number }>(),
     core: null as CoreStatus | null,
     coreCheck: null as CoreCheck | null,
-    coreBusy: false,
+    coreBusy: null as 'check' | 'stage' | null,
+    coreError: null as { title: string; detail: string } | null,
     migration: false,
     recoveryRequired: false,
     recoveryMessages: [] as string[],
@@ -119,6 +124,12 @@
     summary: requiredElement('catalog-summary', HTMLElement),
     statePanel: requiredElement('state-panel', HTMLElement),
     list: requiredElement('capability-list', HTMLElement),
+    detailDialog: requiredElement('capability-dialog', HTMLDialogElement),
+    detailClose: requiredElement('capability-dialog-close', HTMLButtonElement),
+    detailTitle: requiredElement('capability-dialog-title', HTMLElement),
+    detailIntro: requiredElement('capability-dialog-intro', HTMLElement),
+    detailScroll: requiredElement('capability-dialog-scroll', HTMLElement),
+    detailContent: requiredElement('capability-dialog-content', HTMLElement),
     filters: requiredElement('filters', HTMLElement),
     search: requiredElement('search-input', HTMLInputElement),
     coreVersion: requiredElement('core-version', HTMLElement),
@@ -197,16 +208,22 @@
 
   function setConnection(kind: string, text: string) {
     elements.connection.dataset.state = kind;
+    elements.connection.removeAttribute('title');
     elements.connectionText.textContent = text;
+  }
+
+  function activeServerUrl() {
+    return state.localOnly ? '' : state.serverUrl;
   }
 
   function setLoading(loading: boolean) {
     state.loading = loading;
     elements.connectButton.disabled = loading || state.preview;
     elements.serverUrl.disabled = state.preview;
-    elements.offlineButton.disabled = loading || state.preview;
+    elements.offlineButton.disabled = loading || state.preview || !state.serverUrl;
+    elements.offlineButton.textContent = state.localOnly ? '返回内网目录' : '离线管理';
     elements.connectButton.textContent = loading ? '正在刷新' : '保存并刷新';
-    elements.coreCheck.disabled = state.preview || loading || state.coreBusy || !state.serverUrl;
+    elements.coreCheck.disabled = state.preview || loading || state.coreBusy !== null || !activeServerUrl();
   }
 
   function showState(title: string, detail: string, kind = 'empty') {
@@ -266,20 +283,24 @@
     return await response.json() as T;
   }
 
-  async function load(serverUrl: string) {
+  async function load(serverUrl: string, { background = false } = {}) {
     state.loading = true;
     setLoading(true);
     setConnection('loading', '正在读取');
-    showState('正在读取能力', '目录不可用时仍会显示本机账本。', 'empty');
-    elements.list.replaceChildren();
+    if (!background && !elements.detailDialog.open) {
+      showState('正在读取能力', '目录不可用时仍会显示本机账本。', 'empty');
+      elements.list.replaceChildren();
+    }
     try {
       const query = serverUrl ? `?server=${encodeURIComponent(serverUrl)}` : '';
       const payload = await requestJson<StatusPayload>(`/capability-center/api/status${query}`, {
         headers: { accept: 'application/json' },
       });
       applyPayload(payload);
-      setConnection(state.online ? 'online' : 'offline', state.preview ? '本地预览' : state.online ? '目录可用' : '本机账本');
-      if (state.onlineError) showState('目录暂不可用', `${state.onlineError} 已安装能力仍可检查和卸载。`, 'empty');
+      setConnection(state.online ? 'online' : 'offline', state.preview
+        ? '本地预览'
+        : state.online ? '目录可用' : state.onlineError ? '目录不可用 · 本机记录' : '本机已安装');
+      elements.connection.title = state.onlineError ?? '';
     } catch (error) {
       state.error = error instanceof Error ? error.message : String(error);
       state.catalog = [];
@@ -303,13 +324,21 @@
       return;
     }
     localStorage.setItem(STORAGE_KEY, serverUrl);
+    if (state.serverUrl !== serverUrl) {
+      state.coreCheck = null;
+      state.coreError = null;
+    }
     state.serverUrl = serverUrl;
-    elements.coreCheck.disabled = false;
+    state.localOnly = false;
     await load(serverUrl);
   }
 
   async function loadOffline() {
-    await load('');
+    state.localOnly = !state.localOnly;
+    state.coreCheck = null;
+    state.coreError = null;
+    renderStatusMessages();
+    await load(activeServerUrl());
   }
 
   function localState(item: Capability): LocalState {
@@ -322,14 +351,14 @@
       if (item.delisted) return { kind: 'warning', label: '已下架', detail: '本机仍保留安装记录，可检查或卸载。' };
       return { kind: 'idle', label: '未安装', detail: local.detail || '本机账本未记录。' };
     }
+    if (local.activation === 'restart-required') {
+      return { kind: 'warning', label: '等待重启', detail: local.detail || '安装已保存，运行态尚未生效' };
+    }
     const current = local.currentVersion || item.version;
     if (compareVersions(item.version, current) > 0 && state.online && !item.delisted) {
       return { kind: 'warning', label: '可更新', detail: `本机 ${current}，目录 ${item.version}` };
     }
-    if (local.ready) return { kind: 'ready', label: '可使用', detail: local.detail || '自动检查通过' };
-    if (local.activation === 'restart-required') {
-      return { kind: 'warning', label: '等待重启', detail: local.detail || '安装已保存，运行态尚未生效' };
-    }
+    if (local.ready) return { kind: 'ready', label: '已安装', detail: local.detail || '自动检查通过' };
     if (local.legacy) return { kind: 'warning', label: '旧版已检测', detail: local.detail || '保留原安装，可检查或卸载' };
     return { kind: 'warning', label: '检查异常', detail: local.detail || '运行“检查与修复”查看原因' };
   }
@@ -346,141 +375,203 @@
     });
   }
 
+  function focusedCardControl() {
+    const active = document.activeElement;
+    if (!(active instanceof HTMLButtonElement)) return null;
+    const id = active.closest<HTMLElement>('.capability-item')?.dataset.itemId;
+    return id ? { id, action: active.dataset.cardAction } : null;
+  }
+
+  function restoreCardFocus(focus: ReturnType<typeof focusedCardControl>) {
+    if (!focus) return;
+    const card = elements.list.querySelector(`[data-item-id="${focus.id}"]`);
+    const action = focus.action
+      ? card?.querySelector<HTMLButtonElement>(`[data-card-action="${focus.action}"]:not(:disabled)`)
+      : null;
+    (action ?? card?.querySelector<HTMLButtonElement>('.capability-card-body') ?? elements.search)
+      .focus({ preventScroll: true });
+  }
+
   function render() {
+    const focus = focusedCardControl();
     elements.list.replaceChildren();
     if (state.loading) return;
     if (state.error) return;
+    renderDetails();
     const items = visibleItems();
     if (items.length === 0) {
+      const catalogError = state.catalog.length === 0 ? state.onlineError : null;
       showState(
-        state.catalog.length === 0 ? '本机暂无能力记录' : '没有匹配的能力',
-        state.catalog.length === 0 ? '连接内网目录后即可安装能力；已安装项不需要分发服务也能管理。' : '清空搜索或切换类型后重试。',
+        catalogError ? '目录暂不可用' : state.catalog.length === 0 ? '本机暂无已安装能力' : '没有匹配的能力',
+        catalogError || (state.catalog.length === 0
+          ? '连接内网目录后即可安装能力。'
+          : '清空搜索或切换类型后重试。'),
         'empty',
       );
       return;
     }
     elements.statePanel.hidden = true;
     for (const item of items) elements.list.append(renderItem(item));
+    restoreCardFocus(focus);
   }
 
-  function primaryAction(item: Capability, status: ItemStatus, busy: boolean) {
+  function renderActions(item: Capability, status: ItemStatus, location: 'card' | 'detail') {
     const local = localState(item);
     const operation = state.operations.get(item.id);
-    if (busy) {
-      return el('button', { className: 'button button-primary', type: 'button', disabled: true },
-        operation?.phase || '处理中');
-    }
+    const trialPending = state.draftAttempts.get(item.id)?.status === 'pending';
+    const locked = state.loading || state.preview || trialPending || (operation !== undefined && !operation.terminal);
+    const actions = el('div', { className: location === 'card' ? 'card-actions' : 'detail-actions' });
+    const addAction = (key: string, label: string, run: () => void, primary = false, disabled = false) => {
+      actions.append(el('button', {
+        className: `button ${primary ? 'button-primary' : 'button-quiet'}`,
+        type: 'button',
+        [`data-${location}-action`]: key,
+        disabled: locked || disabled,
+        'aria-label': `${label} ${item.name}`,
+        onclick: run,
+      }, label));
+    };
+
     if (!local.installed) {
-      return el('button', {
-        className: 'button button-primary',
-        type: 'button',
-        disabled: state.preview || !state.online,
-        title: state.preview ? '请在 DSH 内安装' : state.online ? '' : '安装需要先连接内网目录',
-        onclick: () => runAction(item, 'install'),
-      }, '安装');
+      addAction('install', '安装', () => runAction(item, 'install'), true, !state.online);
+      return actions;
     }
-    if (status.label === '可更新') {
-      return el('button', {
-        className: 'button button-primary',
-        type: 'button',
-        onclick: () => runAction(item, 'update'),
-      }, '更新');
+    const updatable = status.label === '可更新';
+    if (updatable) addAction('update', '更新', () => runAction(item, 'update'), true);
+    if (local.ready && item.trialAvailable !== false && typeof item.trial?.prompt === 'string') {
+      addAction('trial', '试用', () => openTrialDraft(item), !updatable);
     }
-    if (local.ready) {
-      return el('button', {
-        className: 'button button-primary',
-        type: 'button',
-        onclick: () => openTrialDraft(item),
-      }, '试用');
+    if (location === 'detail') {
+      addAction('diagnose', '检查与修复', () => runAction(item, 'diagnose'));
     }
-    return el('button', {
-      className: 'button',
-      type: 'button',
-      onclick: () => runAction(item, 'diagnose'),
-    }, '检查与修复');
+    if (local.preexisting) {
+      if (location === 'detail') actions.append(el('span', { className: 'detail-note' }, '此项需到“DSH 插件页”管理'));
+    } else {
+      addAction('uninstall', '卸载', () => {
+        if (window.confirm(`卸载“${item.name}”？`)) void runAction(item, 'uninstall');
+      });
+    }
+    return actions;
+  }
+
+  function renderLocalStatus(item: Capability, status: ItemStatus) {
+    const installed = localState(item).installed === true;
+    const label = installed && status.label !== '已安装' ? `已安装 · ${status.label}` : status.label;
+    return el('span', { className: 'local-state', 'data-state': status.kind, title: status.detail }, label);
+  }
+
+  const CATEGORY_ICONS = {
+    skill: 'M5 4h5a2 2 0 0 1 2 2v13a3 3 0 0 0-3-3H5z M19 4h-5a2 2 0 0 0-2 2v13a3 3 0 0 1 3-3h4z',
+    plugin: 'M9 3v5m6-5v5M7 8h10v3a5 5 0 0 1-10 0zM12 16v5',
+    python: 'm8 6-5 6 5 6m8-12 5 6-5 6m-3-14-2 16',
+    composite: 'm12 3 8 4.5v9L12 21l-8-4.5v-9zM4 7.5l8 4.5 8-4.5M12 12v9M8 5.25l8 4.5',
+  };
+
+  function categoryIcon(type: CapabilityType) {
+    const icon = el('span', { className: 'capability-icon', 'data-type': type, 'aria-hidden': 'true' });
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    const path = document.createElementNS(svg.namespaceURI, 'path');
+    path.setAttribute('d', CATEGORY_ICONS[type] ?? CATEGORY_ICONS.composite);
+    svg.append(path);
+    icon.append(svg);
+    return icon;
   }
 
   function renderItem(item: Capability) {
     const status = statusFor(item);
-    const local = localState(item);
-    const operation = state.operations.get(item.id);
-    const busy = operation !== undefined && !operation.terminal;
-    const trialPending = state.draftAttempts.get(item.id)?.status === 'pending';
     const listItem = el('li', { className: 'capability-item', 'data-item-id': item.id });
-    const row = el('div', { className: 'capability-row' });
-    row.append(el('span', { className: 'type-label' }, TYPE_LABELS[item.type] || item.type));
-
-    const main = el('div', { className: 'capability-main' });
-    const nameLine = el('div', { className: 'capability-name-line' });
-    nameLine.append(
+    const card = el('button', {
+      className: 'capability-card-body', type: 'button', 'aria-haspopup': 'dialog',
+      'aria-label': `查看 ${item.name} 详情`,
+      onclick: () => {
+        state.detailItemId = item.id;
+        elements.detailContent.replaceChildren();
+        elements.detailScroll.scrollTop = 0;
+        renderDetails();
+        elements.detailDialog.showModal();
+        elements.detailClose.focus();
+      },
+    });
+    const title = el('span', { className: 'capability-card-title' });
+    title.append(
+      categoryIcon(item.type),
       el('strong', { className: 'capability-name' }, item.name),
-      el('span', { className: 'version' }, `v${local.currentVersion || item.version}`),
+      el('span', { className: 'version' }, `v${localState(item).currentVersion || item.version}`),
     );
-    main.append(nameLine, el('p', { className: 'capability-description' }, item.description));
-
-    const localStateNode = el('span', {
-      className: 'local-state',
-      'data-state': status.kind,
-      title: status.detail,
-    }, status.label);
-
-    const actions = el('div', { className: 'row-actions' });
-    const primary = primaryAction(item, status, busy || trialPending);
-    if (trialPending) primary.textContent = '正在新建';
-    actions.append(primary);
-    const more = el('details', { className: 'row-more' });
-    more.append(el('summary', {}, '更多'));
-    const menu = el('div', { className: 'more-menu' });
-    menu.append(el('button', {
-      type: 'button',
-      disabled: busy || !local.installed,
-      onclick: () => { more.open = false; runAction(item, 'diagnose'); },
-    }, '检查与修复'));
-    menu.append(el('button', {
-      type: 'button',
-      disabled: busy || !local.installed || local.preexisting
-        || state.draftAttempts.get(item.id)?.status === 'pending',
-      title: local.preexisting ? '旧版插件由 DSH 插件页管理，能力中心不会移除。' : undefined,
-      onclick: () => {
-        if (local.preexisting) return;
-        more.open = false;
-        runAction(item, 'uninstall');
-      },
-    }, local.preexisting ? '卸载（到插件页）' : '卸载'));
-    if (local.preexisting) {
-      menu.append(el('span', { className: 'more-note' }, '此项需到“DSH 插件页”管理'));
-    }
-    menu.append(el('button', {
-      type: 'button',
-      onclick: () => {
-        more.open = false;
-        state.openItems.add(item.id);
-        render();
-        detailsRoot(item.id)?.scrollIntoView?.({ block: 'nearest' });
-      },
-    }, '详情'));
-    more.append(menu);
-    actions.append(more);
-    row.append(main, localStateNode, actions);
-    listItem.append(row, renderDraftFeedback(item.id));
-
-    if (operation || state.openItems.has(item.id)) {
-      const details = el('section', { className: 'capability-details', 'data-details-for': item.id });
-      details.append(renderUsage(item));
-      details.append(renderDetailGrid(item, status));
-      if (operation) details.append(renderOperation(item, operation));
-      listItem.append(details);
+    card.append(title, el('span', { className: 'capability-description' }, item.description));
+    const footer = el('div', { className: 'card-footer' });
+    const operation = state.operations.get(item.id);
+    const attempt = state.draftAttempts.get(item.id);
+    footer.append(renderLocalStatus(item, status), renderActions(item, status, 'card'));
+    listItem.append(card, footer);
+    if (operation || attempt) {
+      const feedback = el('p', { className: 'card-feedback', role: 'status' });
+      const message = operation?.error ?? attempt?.message ?? operation?.phase;
+      feedback.textContent = message ?? '';
+      if (operation?.error || attempt?.status === 'error') feedback.dataset.state = 'error';
+      listItem.append(feedback);
     }
     return listItem;
+  }
+
+  function refreshItem(item: Capability) {
+    const card = elements.list.querySelector(`[data-item-id="${item.id}"]`);
+    if (card) {
+      const focus = focusedCardControl();
+      card.replaceWith(renderItem(item));
+      if (focus?.id === item.id) restoreCardFocus(focus);
+    }
+    if (state.detailItemId === item.id) renderDetails();
+  }
+
+  function renderDetails() {
+    if (state.detailItemId === null) return;
+    const item = state.catalog.find(candidate => candidate.id === state.detailItemId);
+    if (item === undefined) {
+      elements.detailDialog.close();
+      return;
+    }
+    const status = statusFor(item);
+    const local = localState(item);
+    const operation = state.operations.get(item.id);
+    const active = document.activeElement;
+    const focusAction = active instanceof HTMLElement ? active.dataset.detailAction : undefined;
+    const focusedTechnical = active === elements.detailContent.querySelector('summary');
+    elements.detailTitle.textContent = item.name;
+    elements.detailIntro.textContent = item.description;
+    const actions = renderActions(item, status, 'detail');
+
+    const summary = el('div', { className: 'detail-summary' });
+    summary.append(
+      categoryIcon(item.type),
+      el('span', {}, TYPE_LABELS[item.type]),
+      el('span', { className: 'version' }, `v${local.currentVersion || item.version}`),
+      renderLocalStatus(item, status),
+    );
+    const technical = el('details', { className: 'detail-technical' });
+    technical.open = elements.detailContent.querySelector('details')?.open ?? false;
+    technical.append(el('summary', {}, '制品与依赖'), renderDetailGrid(item, status));
+    elements.detailContent.replaceChildren(summary, actions, renderDraftFeedback(item.id));
+    if (operation) elements.detailContent.append(renderOperation(item, operation));
+    elements.detailContent.append(renderUsage(item), technical);
+    if (focusedTechnical) technical.querySelector('summary')?.focus({ preventScroll: true });
+    if (focusAction) {
+      const replacement = elements.detailContent.querySelector<HTMLButtonElement>(`[data-detail-action="${focusAction}"]`);
+      if (replacement && !replacement.disabled) replacement.focus({ preventScroll: true });
+      else elements.detailClose.focus({ preventScroll: true });
+    }
   }
 
   function renderUsage(item: Capability) {
     const usage = item.usage || {};
     const section = el('section', { className: 'usage-guide', 'aria-label': '使用说明' });
     section.append(el('h3', {}, '使用说明'));
-    const steps = el('ol', { className: 'usage-steps' });
-    for (const step of usage.steps || []) steps.append(el('li', {}, step));
-    section.append(steps);
+    if (usage.steps?.length) {
+      const steps = el('ol', { className: 'usage-steps' });
+      for (const step of usage.steps) steps.append(el('li', {}, step));
+      section.append(steps);
+    }
     const fields = el('dl', { className: 'usage-fields' });
     if (usage.inputs) fields.append(el('dt', {}, '需要输入'), el('dd', {}, usage.inputs));
     if (usage.output) fields.append(el('dt', {}, '得到输出'), el('dd', {}, usage.output));
@@ -497,7 +588,7 @@
       ['类型', TYPE_LABELS[item.type] || item.type],
       ['版本', `目录 ${item.version}${local.currentVersion ? ` / 本机 ${local.currentVersion}` : ''}`],
       ['来源', local.source || (item.delisted ? '本机缓存' : '内网目录')],
-      ['制品', item.artifact?.path || '组合能力（无独立制品）'],
+      ['制品', item.artifact?.path || '能力包（无独立制品）'],
       ['SHA-256', item.artifact?.sha256 || '由固定依赖版本约束'],
       ['本机状态', status.detail],
       ['依赖', (item.dependencies || []).map(value => `${value.id}@${value.version}`).join('、') || '无'],
@@ -509,7 +600,6 @@
   function renderDraftFeedback(itemId: string) {
     const host = el('div', {
       className: 'draft-feedback-host',
-      'data-draft-host': itemId,
       'aria-live': 'polite',
     });
     const attempt = state.draftAttempts.get(itemId);
@@ -522,17 +612,17 @@
       className: 'operation',
       'data-status': operation.status,
       'aria-label': `${item.name} ${operation.action}状态`,
-      tabindex: '-1',
     });
     const head = el('div', { className: 'operation-head' });
     const label = { install: '安装', update: '更新', diagnose: '检查', uninstall: '卸载' }[operation.action] || operation.action;
     head.append(
       el('span', { className: 'operation-title' }, `${label}进度`),
-      el('span', { className: 'operation-phase' }, operation.error ? `失败：${operation.error}` : operation.phase),
+      el('span', { className: 'operation-phase', role: 'status' }, operation.phase),
     );
     const track = el('div', {
       className: 'progress-track',
       role: 'progressbar',
+      'aria-label': `${label}进度`,
       'aria-valuemin': '0',
       'aria-valuemax': '100',
       'aria-valuenow': String(Math.round((operation.progress || 0) * 100)),
@@ -550,13 +640,10 @@
     return root;
   }
 
-  function detailsRoot(itemId: string) {
-    return elements.list.querySelector(`[data-item-id="${itemId}"] [data-details-for="${itemId}"]`);
-  }
-
   async function runAction(item: Capability, action: Action) {
     const current = state.operations.get(item.id);
     if (current && !current.terminal) return;
+    state.draftAttempts.delete(item.id);
     const placeholder: Operation = {
       action,
       status: 'queued',
@@ -566,9 +653,7 @@
       terminal: false,
     };
     state.operations.set(item.id, placeholder);
-    state.openItems.add(item.id);
-    render();
-    operationRoot(item.id)?.focus();
+    refreshItem(item);
     try {
       const payload = await requestJson<{ operation: Operation & { id: string } }>(`/capability-center/api/actions/${action}`, {
         method: 'POST',
@@ -576,10 +661,10 @@
           'content-type': 'application/json',
           'x-capability-center': '1',
         },
-        body: JSON.stringify({ serverUrl: state.serverUrl, itemId: item.id }),
+        body: JSON.stringify({ serverUrl: activeServerUrl(), itemId: item.id }),
       });
       state.operations.set(item.id, payload.operation);
-      updateOperation(item, payload.operation);
+      refreshItem(item);
       await pollOperation(item, payload.operation.id);
     } catch (error) {
       state.operations.set(item.id, {
@@ -590,8 +675,7 @@
         progress: 1,
         error: error instanceof Error ? error.message : String(error),
       });
-      render();
-      operationRoot(item.id)?.focus();
+      refreshItem(item);
     }
   }
 
@@ -603,24 +687,12 @@
       });
       const operation = payload.operation;
       state.operations.set(item.id, operation);
-      updateOperation(item, operation);
+      refreshItem(item);
       if (operation.terminal) {
-        await load(state.serverUrl);
+        await load(activeServerUrl(), { background: true });
         return;
       }
     }
-  }
-
-  function updateOperation(item: Capability, operation: Operation) {
-    const itemNode = elements.list.querySelector(`[data-item-id="${item.id}"]`);
-    if (!itemNode || !operation) return;
-    state.openItems.add(item.id);
-    render();
-    operationRoot(item.id)?.focus();
-  }
-
-  function operationRoot(itemId: string) {
-    return elements.list.querySelector<HTMLElement>(`[data-item-id="${itemId}"] .operation`);
   }
 
   function draftRequestId() {
@@ -633,21 +705,14 @@
 
   function setDraftAttempt(itemId: string, attempt: DraftAttempt) {
     state.draftAttempts.set(itemId, attempt);
-    updateDraftFeedback(itemId);
-    render();
-  }
-
-  function updateDraftFeedback(itemId: string) {
-    const host = elements.list.querySelector(`[data-draft-host="${itemId}"]`);
-    if (!host) return;
-    host.replaceChildren();
-    const attempt = state.draftAttempts.get(itemId);
-    if (attempt) host.append(el('div', { className: 'draft-feedback', 'data-state': attempt.status }, attempt.message));
+    const item = state.catalog.find(candidate => candidate.id === itemId);
+    if (item) refreshItem(item);
   }
 
   async function openTrialDraft(item: Capability) {
     const existing = state.draftAttempts.get(item.id);
     if (existing?.status === 'pending') return;
+    state.operations.delete(item.id);
     if (window.parent === window) {
       setDraftAttempt(item.id, {
         status: 'error',
@@ -672,7 +737,7 @@
           'x-capability-center': '1',
         },
         body: JSON.stringify({
-          serverUrl: state.serverUrl,
+          serverUrl: activeServerUrl(),
           itemId: item.id,
           requestId,
           source: 'capability-center-frame',
@@ -731,29 +796,39 @@
     }
     const activeVersion = state.core?.activeVersion ?? state.core?.version;
     elements.coreVersion.textContent = activeVersion ? `v${activeVersion}` : '不可用';
-    elements.coreCheck.disabled = state.preview || state.loading || state.coreBusy || !state.serverUrl;
-    const pending = state.core?.pending ?? null;
+    elements.coreCheck.disabled = state.preview || state.loading || state.coreBusy !== null || !activeServerUrl();
+    const pending = state.core?.pending;
+    const check = state.coreCheck;
+    elements.coreStage.hidden = Boolean(pending) || check?.updateAvailable !== true;
+    elements.coreStage.disabled = state.coreBusy !== null;
+    elements.coreStage.textContent = state.coreBusy === 'stage' ? '正在下载' : '下载更新';
+
+    let title: string;
+    let detail: string;
     if (pending?.version) {
-      elements.coreNotice.hidden = false;
-      elements.coreNotice.replaceChildren(
-        el('strong', {}, `核心 v${pending.version} 已准备更新`),
-        el('span', {}, '当前运行时继续使用稳定版本。请在你方便时重启 DSH，下一次启动会自动切换；失败会回退上一核心。'),
-        el('button', { className: 'button button-quiet', type: 'button', onclick: () => { elements.coreNotice.hidden = true; } }, '知道了'),
-      );
-      elements.coreStage.hidden = true;
-    } else if (state.coreCheck?.updateAvailable) {
-      elements.coreNotice.hidden = false;
-      elements.coreNotice.replaceChildren(
-        el('strong', {}, `核心 v${state.coreCheck.latestVersion} 可用`),
-        el('span', {}, '先下载并校验内网 ZIP，准备完成后不会自动重启或打断当前任务。'),
-      );
-      elements.coreStage.hidden = false;
-      elements.coreStage.textContent = state.coreBusy ? '正在准备' : '准备更新';
-      elements.coreStage.disabled = state.coreBusy;
+      title = `重启 DSH 后更新到 v${pending.version}`;
+      detail = '更新已下载。当前版本继续运行，可等手头任务完成后再重启。';
+    } else if (state.coreError) {
+      ({ title, detail } = state.coreError);
+    } else if (check?.updateAvailable) {
+      title = `发现新版本 v${check.latestVersion}`;
+      detail = '下载后需重启 DSH 才会生效。下载期间可以继续工作。';
+    } else if (check) {
+      title = check.latestVersion === null
+        ? '分发服务器没有兼容版本'
+        : compareVersions(check.currentVersion, check.latestVersion) > 0
+          ? `当前 v${check.currentVersion} 已比分发版本更新`
+          : `当前 v${check.currentVersion} 已是最新版本`;
+      detail = '';
     } else {
       elements.coreNotice.hidden = true;
-      elements.coreStage.hidden = true;
+      return;
     }
+    elements.coreNotice.dataset.state = pending ? 'restart' : state.coreError ? 'error' : 'info';
+    elements.coreNotice.replaceChildren(el('strong', {}, title));
+    if (detail) elements.coreNotice.append(el('span', {}, detail));
+    if (pending && state.coreError) elements.coreNotice.append(el('span', {}, state.coreError.detail));
+    elements.coreNotice.hidden = false;
   }
 
   async function loadCoreStatus() {
@@ -767,33 +842,37 @@
   }
 
   async function checkCoreUpdate() {
-    if (!state.serverUrl || state.coreBusy) return;
-    state.coreBusy = true;
-    elements.coreCheck.disabled = true;
+    const serverUrl = activeServerUrl();
+    if (!serverUrl || state.coreBusy) return;
+    state.coreBusy = 'check';
+    state.coreError = null;
+    state.coreCheck = null;
     elements.coreCheck.textContent = '正在检查';
+    renderStatusMessages();
     try {
-      const payload = await requestJson<CoreCheck>(`/capability-center/api/core/check?server=${encodeURIComponent(state.serverUrl)}`, {
+      const payload = await requestJson<CoreCheck>(`/capability-center/api/core/check?server=${encodeURIComponent(serverUrl)}`, {
         headers: { accept: 'application/json' },
       });
-      state.coreCheck = payload;
+      if (serverUrl === activeServerUrl()) state.coreCheck = payload;
     } catch (error) {
-      state.coreCheck = null;
-      elements.coreNotice.hidden = false;
-      elements.coreNotice.replaceChildren(
-        el('strong', {}, '核心更新检查失败'),
-        el('span', {}, error instanceof Error ? error.message : String(error)),
-      );
+      if (serverUrl === activeServerUrl()) {
+        state.coreError = {
+          title: '检查更新失败',
+          detail: error instanceof Error ? error.message : String(error),
+        };
+      }
     } finally {
-      state.coreBusy = false;
-      elements.coreCheck.disabled = false;
+      state.coreBusy = null;
       elements.coreCheck.textContent = '检查更新';
       renderStatusMessages();
     }
   }
 
   async function stageCoreUpdate() {
-    if (!state.serverUrl || state.coreBusy) return;
-    state.coreBusy = true;
+    const serverUrl = activeServerUrl();
+    if (!serverUrl || state.coreBusy) return;
+    state.coreBusy = 'stage';
+    state.coreError = null;
     renderStatusMessages();
     try {
       const payload = await requestJson<{ version: string }>('/capability-center/api/core/stage', {
@@ -802,22 +881,33 @@
           'content-type': 'application/json',
           'x-capability-center': '1',
         },
-        body: JSON.stringify({ serverUrl: state.serverUrl }),
+        body: JSON.stringify({ serverUrl }),
       });
-      await loadCoreStatus();
       state.core = { ...state.core, pending: { version: payload.version } };
     } catch (error) {
-      elements.coreNotice.hidden = false;
-      elements.coreNotice.replaceChildren(
-        el('strong', {}, '核心更新准备失败'),
-        el('span', {}, `${error instanceof Error ? error.message : String(error)} 当前核心继续运行。`),
-      );
+      if (serverUrl === activeServerUrl()) {
+        state.coreError = {
+          title: '下载更新失败',
+          detail: error instanceof Error ? error.message : String(error),
+        };
+      }
     } finally {
-      state.coreBusy = false;
+      state.coreBusy = null;
       renderStatusMessages();
     }
   }
 
+  elements.detailDialog.addEventListener('click', event => {
+    if (event.target === elements.detailDialog) elements.detailDialog.close();
+  });
+  elements.detailDialog.addEventListener('close', () => {
+    const itemId = state.detailItemId;
+    state.detailItemId = null;
+    if (itemId) {
+      const trigger = elements.list.querySelector<HTMLButtonElement>(`[data-item-id="${itemId}"] .capability-card-body`);
+      (trigger ?? elements.search).focus({ preventScroll: true });
+    }
+  });
   elements.sourceForm.addEventListener('submit', submitServer);
   elements.offlineButton.addEventListener('click', loadOffline);
   elements.coreCheck.addEventListener('click', checkCoreUpdate);

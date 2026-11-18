@@ -144,6 +144,11 @@ export function fakeContext(options = {}) {
       async listBundles() {
         return [...bundles.values()].map(value => ({ ...value }))
       },
+      async listPlugins() {
+        return options.listPlugins === undefined
+          ? []
+          : await options.listPlugins(bundles)
+      },
       async installBundle(spec, installOptions) {
         calls.push({ kind: 'installBundle', spec, installOptions })
         const result = await options.installBundle?.(spec, installOptions, bundles)

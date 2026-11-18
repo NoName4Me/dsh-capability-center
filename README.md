@@ -1,8 +1,8 @@
-# DSH 能力中心 0.2.3
+# DSH 能力中心 0.2.6
 
-面向 DSH `0.2.1-rc.2` 的只读内网能力分发中心。它管理技能、DSH 插件、纯 Python 库和平面组合能力，不要求账号、凭据或模型调用。安装只使用目录声明的本地制品、固定版本和 SHA-256。
+面向内网 DSH `0.2.1-rc.2` 至 `0.2.2-rc.2` 的只读能力分发中心。它管理技能、DSH 插件、纯 Python 库和能力包，不要求账号、凭据或模型调用。安装只使用目录声明的本地制品、固定版本和 SHA-256。
 
-当前能力中心版本为 `0.2.3`，目标宿主为 DSH `0.2.1-rc.2`。
+当前能力中心版本为 `0.2.6`。核心协议继续使用 `0.2.1-rc.2` 作为兼容标记；实际宿主版本门禁由引导插件和各个插件包的 `engines.dsh` 执行，覆盖文档中的 Win7 `0.2.1-rc.5`、Win10 `0.2.1-rc.2` 以及已测试的 macOS `0.2.2-rc.1`。
 
 [项目文档索引](docs/README.md)
 
@@ -31,8 +31,9 @@ python3 dist/start-server.py --host 127.0.0.1 --port 8765
 
 `capability-center-offline.zip` 解压后得到完整分发目录 `capability-center/`：
 
-- `packages/capability-center-0.2.3.tgz`：稳定引导插件，首次通过 DSH“插件 → 添加插件”安装。
-- `core/capability-center-core-0.2.3.zip`：当前可替换核心，包含隐藏组件过滤、组件直接动作保护和固定 Office 自动检查。
+- `packages/capability-center-0.2.6.tgz`：稳定引导插件，也是唯一需要首次通过 DSH“插件 → 添加插件”手动安装的制品。
+- `packages/dsh-intranet-auto-continue-1.1.0.tgz`：目录中的“自动续跑”宿主插件，由能力中心安装、更新和卸载。
+- `core/capability-center-core-0.2.6.zip`：当前可替换核心，包含可见插件目录、插件运行态检查、隐藏组件过滤、组件直接动作保护和固定 Office 自动检查。
 - `packages/office-enhancement-skill-1.0.0.zip`：Office 增强的隐藏技能，只包含固定的 `office_tools.py`、`office_smoke.py`、许可证和 provenance。
 - `packages/pypdf-7.1.0-py3-none-any.whl`：官方 PyPI 纯 Python wheel，作为 PDF 隐藏组件。
 - `catalog.json`、`core-release-index.json`、`artifact-manifest.json`、`publication-registry.json`：固定目录、核心索引、当前制品清单和发布校验记录。
@@ -48,24 +49,22 @@ python3 dist/start-server.py --host 127.0.0.1 --port 8765
    ```
 
 3. 在 DSH 中打开“插件 → 添加插件”，粘贴服务打印的 `Initial plugin URL`。
-4. 安装并启用 `capability-center-0.2.3.tgz`，根据 DSH 返回结果重启。
+4. 安装并启用 `capability-center-0.2.6.tgz`，根据 DSH 返回结果重启。这是本产品唯一需要手动交给 DSH 安装的插件。
 5. 打开侧栏“能力中心”，填写分发基础地址，例如 `http://192.168.1.20:8765/`。
 
 分发服务没有登录、上传接口或写接口。请用防火墙限制到公司内网，并为分发机配置稳定地址。
 
-### 从能力中心 0.2.1 升级
+### 升级现有能力中心
 
-从 `0.2.2` 开始，目录包含固定的 `office-smoke` 检查。`0.2.1` 核心会按设计拒绝加载这个新目录，因此旧页面的能力列表暂时无法打开；这是 fail-closed，避免旧核心跳过 Office 固定检查、所有权借用或回滚逻辑后仍安装能力。
+已安装 `0.2.3` 至 `0.2.5` 时不需要重装引导插件。保持分发服务可用，按以下顺序升级：
 
-旧核心仍可独立读取 `core-release-index.json` 并更新自身，不需要先打开目录。按以下顺序升级：
+1. 在“能力中心”填写分发地址，点“检查更新”。
+2. 点“下载更新”。在旧版页面中，此按钮叫“准备更新”。
+3. 重启 DSH。启动监督器会激活 `0.2.6`，候选启动失败时回退上一健康核心。
+4. 重新打开“能力中心”，确认核心为 `v0.2.6`，刷新目录。
+5. 打开“自动续跑”卡片。首次使用点击“安装”，已安装旧版则点击“更新”以使用续跑设置和记录。只有 DSH 显示“等待重启”时，才需为插件再重启一次。
 
-1. 保持 `0.2.1` 页面和分发服务可用，在“能力中心”中填写分发地址。
-2. 点“检查更新”。即使能力目录显示校验失败，顶部核心检查仍会读取独立的核心发布索引。
-3. 点“准备更新”。确认提示显示“核心 v0.2.3 已准备更新”；这一步只下载、校验并持久化核心，不打断当前任务。
-4. 重启 DSH。启动监督器会激活 `0.2.3`；启动失败时会回退上一健康核心。
-5. 重新打开“能力中心”，确认核心为 `v0.2.3`，再刷新目录并按需安装“Office 增强”。
-
-稳定的 `capability-center` 引导插件无需随本次核心更新替换。若环境中的引导过旧、没有核心更新控件，可直接在 DSH“插件 → 添加插件”安装 `packages/capability-center-0.2.3.tgz`，再启动分发服务。
+从更早版本升级时，顶部核心检查仍独立读取 `core-release-index.json`。即使旧核心因目录检查类型较新而无法显示能力列表，也先准备并重启到 `0.2.6`，再刷新目录。引导过旧且没有核心更新控件时，才需要用 `packages/capability-center-0.2.6.tgz` 人工替换一次。
 
 ### 管理已下架的示例能力
 
@@ -81,15 +80,26 @@ python3 dist/start-server.py --host 127.0.0.1 --port 8765
 
 ## 使用
 
-- “安装 / 更新 / 试用”是主操作；“更多”提供“检查与修复”“卸载”“详情”。
+- 卡片显示安装状态，并提供安装、更新、卸载和适用的试用入口。点击卡片主体查看详情和“检查与修复”。
 - 安装完成后自动执行目录声明的有界检查。离线时仍可读取本机账本、诊断和卸载已安装能力。
 - “试用”只通过 DSH 可信客户端桥新建会话并填入草稿，不会自动发送。
-- 顶部“检查更新 / 准备更新”只下载、校验并持久化下一版核心。当前任务继续运行，下一次启动 DSH 时激活；候选启动失败会回退上一健康核心。
-- 隐藏组件不与组合一起显示，也不能被单独安装、检查、试用或卸载。目录仍以平面依赖图表示依赖关系。
+- 顶部“检查更新 / 下载更新”只下载、校验并持久化下一版核心。当前任务继续运行，下一次启动 DSH 时激活；候选启动失败会回退上一健康核心。
+- 隐藏组件不在能力目录中显示，也不能被单独安装、检查、试用或卸载。目录仍以平面依赖图表示依赖关系。
+
+## 自动续跑
+
+“自动续跑”由能力中心安装或更新到 `dsh-intranet-auto-continue@1.1.0`。在 DSH「插件 → 自动续跑」打开设置页。
+
+- 「启用自动续跑」是总开关。保存关闭后，已排队的续跑会取消。
+- 每项任务默认续跑 **1 次**，可设为 **1–5 次**。只有符合条件的临时中断能触发续跑。用户发新消息后从头计数。
+- 「会话暂停」可单独暂停或恢复某个会话。配置保存在当前 DSH profile 中。
+- 最近记录保留本次运行的 30 条发送、跳过和取消原因，只显示状态和会话标识，不记录提示词或原始错误正文。DSH 重启后清空。
+
+续跑范围包括超时、传输中断、流提前关闭、空响应、输出达到上限、429 或服务端故障。超过等待上限的限流响应、工具结果不确定、权限限制和原因不明的退出会跳过。待发送期间的新消息、模型或权限变更，以及会话关闭都会取消这次续跑。如果 DSH 显示「等待重启」，重启后插件才会启用。
 
 ## Office 增强
 
-“Office 增强”是一个可见组合，内部固定引用隐藏技能 `office-enhancement-skill@1.0.0` 和隐藏包 `python-pypdf@7.1.0`。它复用 DSH Python 中的 `python-docx 1.2.0`、`openpyxl 3.1.5`、`python-pptx 1.0.2`、`pandas 3.0.1`，并要求 Python `>=3.11 <3.13`。兼容目标为 DSH `0.2.1-rc.2`。
+“Office 增强”是一个可见能力包，内部固定引用隐藏技能 `office-enhancement-skill@1.0.0` 和隐藏包 `python-pypdf@7.1.0`。它复用 DSH Python 中的 `python-docx 1.2.0`、`openpyxl 3.1.5`、`python-pptx 1.0.2`、`pandas 3.0.1`，并要求 Python `>=3.11 <3.13`。兼容目标为 DSH `0.2.1-rc.2`。
 
 安装后的自动检查会读取真实 DSH Python，校验固定版本，并在系统临时目录创建合成文件，实际执行 PDF、DOCX、XLSX 和 PPTX 操作。全程使用安装包内哈希固定的 `office_smoke.py` 和 `office_tools.py`，从目录执行任意 shell 脚本的路径不存在。详细技能说明见 [`src/capabilities/office-enhancement/SKILL.md`](src/capabilities/office-enhancement/SKILL.md)；安装后的技能目录由 DSH 技能注册表显示为 `office-enhancement-skill`。
 
@@ -148,7 +158,7 @@ CAPABILITY_CENTER_BUILD_PYTHON=/path/to/python3 npm run build
 
 ```sh
 node tools/publish.mjs catalog --storage dist --catalog dist/catalog.json
-node tools/publish.mjs core --storage dist --archive dist/core/capability-center-core-0.2.3.zip
+node tools/publish.mjs core --storage dist --archive dist/core/capability-center-core-0.2.6.zip
 ```
 
 历史离线 ZIP 由 GitHub Releases 按版本保留。作者工具对同一个分发目录以 `publication-registry.json` 校验同版本制品一致性。修改已发布的能力制品时，请提升其版本。

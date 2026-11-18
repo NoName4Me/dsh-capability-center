@@ -2,7 +2,7 @@
 
 ## 目标与兼容边界
 
-目标宿主是 DSH `0.2.1-rc.2`，当前能力中心核心版本是 `0.2.3`。这里的 `0.2.3` 是能力中心发布版本，不是目标 DSH 宿主版本。稳定引导包名为 `capability-center`，可替换核心包名为 `capability-center-core`。产品不访问公共 npm、GitHub、pip 或模型；所有运行制品和依赖闭包由内网只读服务提供。
+当前能力中心核心版本是 `0.2.6`。这里的 `0.2.6` 是能力中心发布版本，不是 DSH 宿主版本。核心协议继续以 DSH `0.2.1-rc.2` 作为内部兼容标记，稳定引导的 `engines.dsh` 则声明为 `>=0.2.1-rc.2 <0.2.3`，覆盖文档中的 Win7、Win10 和已测试 macOS 预发布版本。稳定引导包名为 `capability-center`，可替换核心包名为 `capability-center-core`。产品不访问公共 npm、GitHub、pip 或模型；所有运行制品和依赖闭包由内网只读服务提供。
 
 设计参考了 [dsh-market](https://github.com/dsh-market/dsh-market/tree/88de9575946485c1dac5e1a5fbe57fa1f3c3988c)。对该仓库 `88de9575946485c1dac5e1a5fbe57fa1f3c3988c`（`dshmarket@1.73.20`，MIT）仅借鉴目录/本机分离、变更前日志、明确更新状态和失败码等架构模式，没有复制其大段实现或品牌资产。其官方桌面原位更新在宿主提供 package manager 时可用，但依赖公共包通道；本产品改用稳定引导与版本化核心，以适配无明显通用热替换保证的隔离内网。
 
@@ -10,7 +10,7 @@
 
 | 操作系统 | 架构 | 已安装的 DSH |
 | --- | --- | --- |
-| Windows 10 | x64 | `deepseek-harness-0.2.2-rc.2` |
+| Windows 10 | x64 | `deepseek-harness-0.2.1-rc.2` |
 | Windows 7 | x64 | `deepseek-harness-0.2.1-rc.5-win7` |
 
 新增或修改能力时，以这两组环境为参考，分别评估宿主接口、运行时依赖和离线安装的兼容性。实机验证结果按对应的 Windows 和 DSH 版本记录。
@@ -36,11 +36,13 @@ DSH native plugin: capability-center
 
 引导的 `ctx.effect` 注册路由并监督子插件。激活候选时调用 `ctx.plugin(module, { runtime })`，捕获返回 Fiber，并显式 `await fiber.await()`；失败后调用 `fiber.dispose()` 释放其已注册路由，再用相同流程启动上一健康核心或种子。引导 dispose 会停止接受新工作并 drain 启动/核心暂存队列。
 
-`engine-state.json` 保存 `current`、`previous`、`pending` 和最近失败。核心 ZIP 在 `.staging-*` 解包并通过 manifest、`type: module`、入口、rc.2 兼容、字节数和 SHA-256 检查后，原子 rename 到不可变 `releases/<version>`。同版本不同哈希会被拒绝。待激活版本只在下一次 DSH 启动尝试；当前运行时保持原核心，失败后回退。
+`engine-state.json` 保存 `current`、`previous`、`pending` 和最近失败。核心 ZIP 在 `.staging-*` 解包并通过 manifest、`type: module`、入口、内部 rc.2 兼容标记、字节数和 SHA-256 检查后，原子 rename 到不可变 `releases/<version>`。同版本不同哈希会被拒绝。待激活版本只在下一次 DSH 启动尝试；当前运行时保持原核心，失败后回退。
 
 ## 目录与能力模型
 
 目录 schema v2 的每个条目包含稳定 ID、类型、名称、语义版本、兼容矩阵、描述、用法、试用提示和类型化检查。可选 `hidden: true` 只用于组合的内部组件：服务端校验布尔类型，Web UI 过滤隐藏行，安装、诊断、试用和卸载入口拒绝组件直接动作。制品路径必须与目录同源。组合条目不含制品，只包含固定 `{id, version}` 引用。
+
+可见插件条目使用现有本地 TGZ、`installBundle`、账本和回滚路径。安装时显式请求启用；`plugin-bundle` 检查从目录条目派生包名和版本，再读取宿主 `listBundles()` 与 `listPlugins()`，分别报告已激活、停用、缺失、启动失败和待重启。只有对应 Loader 行的 `fiberPhase` 为 `active` 时才清除 `restart-required` 状态。
 
 首版执行平面组合限制：组合的直接子项必须是非组合，且子项不能再声明传递依赖。依赖图仍统一验证重复 ID、缺失项、固定版本不一致和环；超出平面范围时返回 `unsupported-nested-composite`，避免声称支持任意依赖求解。
 
@@ -71,6 +73,7 @@ DSH native plugin: capability-center
 - `python-import`：在 DSH 返回的真实 Python 中导入并校验版本。
 - `python-function`：只允许实现内固定的 `tabulate-table` 检查，并验证真实表格内容。
 - `office-smoke`：只允许固定的 `office-enhancement` 组合使用；从哈希固定的第一方技能资产运行已知检查脚本，使用真实 DSH Python 验证固定库版本并创建临时 PDF、DOCX、XLSX、PPTX 夹具执行实际操作。
+- `plugin-bundle`：只允许插件使用；从固定目录条目派生包名与版本，读取真实 BundleInfo 及 Loader 运行态，不依赖虚构工具。
 
 ## 可信草稿桥
 
@@ -84,4 +87,4 @@ DSH native plugin: capability-center
 
 ## 验收边界
 
-自动测试覆盖账本原子写、提交崩溃边界、普通异常回滚、模拟崩溃后恢复、插件回滚验证、共享固定依赖冲突、离线/下架卸载、无降级、核心下次启动激活与失败回退、Node 24 close-FIN、真实 Python 3.12 venv、可信草稿桥和分发服务。Office 测试使用真实 DSH Python 和实际 pip 安装的官方 pypdf，覆盖 fresh、borrowed、无制品端点复用、共享引用、冲突拒绝、异常回滚、注册表清理和卸载保留外部安装。Windows 与真实 DSH 桌面 UI 必须在目标机上另行验收；本轮环境只能完成 macOS 构建、单元与集成检查。
+自动测试覆盖账本原子写、提交崩溃边界、普通异常回滚、模拟崩溃后恢复、插件回滚验证、可见插件目录与固定哈希、真实 BundleInfo 形状的安装/待重启/激活/卸载检查、共享固定依赖冲突、离线/下架卸载、无降级、核心下次启动激活与失败回退、Node 24 close-FIN、真实 Python 3.12 venv、可信草稿桥和分发服务。Office 测试使用真实 DSH Python 和实际 pip 安装的官方 pypdf，覆盖 fresh、borrowed、无制品端点复用、共享引用、冲突拒绝、异常回滚、注册表清理和卸载保留外部安装。Windows 与真实 DSH 桌面 UI 必须在目标机上另行验收；本轮环境只能完成 macOS 构建、单元与集成检查。

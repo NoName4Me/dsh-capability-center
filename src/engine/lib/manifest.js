@@ -53,6 +53,7 @@ function validCompatibility(value) {
 function validCheck(value) {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
   if (value.type === 'office-smoke') return Object.keys(value).length === 1
+  if (value.type === 'plugin-bundle') return Object.keys(value).length === 1
   if (value.type === 'skill-discovery') return value.name === undefined || ID.test(value.name)
   if (value.type === 'named-tool-readonly-call') {
     return typeof value.tool === 'string' && /^[A-Za-z_][A-Za-z0-9_.-]{0,100}$/u.test(value.tool)
@@ -112,6 +113,12 @@ function validateItem(item, index, base) {
     throw new CapabilityError(
       'invalid-catalog',
       'office-smoke 只能用于固定的 office-enhancement 组合能力。',
+    )
+  }
+  if (item.checks.some(check => check.type === 'plugin-bundle') && item.type !== 'plugin') {
+    throw new CapabilityError(
+      'invalid-catalog',
+      'plugin-bundle 只能用于插件能力。',
     )
   }
   if (item.type === 'plugin') {

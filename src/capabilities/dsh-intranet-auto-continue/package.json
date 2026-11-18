@@ -1,0 +1,38 @@
+{
+  "name": "dsh-intranet-auto-continue",
+  "version": "1.1.0",
+  "description": "Continues a conversation after recoverable interruptions, with configurable retry limits.",
+  "type": "module",
+  "main": "plugin.js",
+  "exports": {
+    ".": "./plugin.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./client": "./client.js"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "plugin.js",
+    "client.js"
+  ],
+  "engines": {
+    "dsh": ">=0.2.1-rc.2 <0.2.3",
+    "node": ">=22"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-plugin-manager",
+        "@deepseek-ai/dsh-api-session-controller"
+      ]
+    }
+  },
+  "license": "MIT"
+}

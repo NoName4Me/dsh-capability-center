@@ -94,6 +94,20 @@ const packedBootstrap = JSON.parse(run('npm', ['pack', '--json', '--pack-destina
 }))[0]
 if (typeof packedBootstrap?.filename !== 'string') throw new Error('Bootstrap npm pack returned no filename')
 
+const autoContinueBuild = join(work, 'auto-continue-build')
+await cp(
+  join(root, 'src', 'capabilities', 'dsh-intranet-auto-continue'),
+  autoContinueBuild,
+  { recursive: true },
+)
+const autoContinueManifest = JSON.parse(await readFile(join(autoContinueBuild, 'package.json'), 'utf8'))
+const packedAutoContinue = JSON.parse(run('npm', ['pack', '--json', '--pack-destination', packages], {
+  cwd: autoContinueBuild,
+}))[0]
+if (typeof packedAutoContinue?.filename !== 'string') {
+  throw new Error('Auto-continue npm pack returned no filename')
+}
+
 const officeSkillSource = join(root, 'src', 'capabilities', 'office-enhancement')
 const officeSkillBuild = join(work, 'office-skill-build')
 const officeSkillRoot = join(officeSkillBuild, 'office-enhancement-skill')
@@ -127,6 +141,7 @@ await cp(
 
 const artifacts = {
   bootstrap: await artifact(join(packages, packedBootstrap.filename)),
+  autoContinue: await artifact(join(packages, packedAutoContinue.filename)),
   officeSkill: await artifact(officeSkillZip),
   pypdf: await artifact(join(packages, 'pypdf-7.1.0-py3-none-any.whl')),
   core: await artifact(coreZip),
@@ -138,6 +153,38 @@ const catalog = {
   name: 'DSH rc.2 内网能力目录',
   generatedFor: 'dsh-v0.2.1-rc.2',
   items: [
+    {
+      id: 'dsh-intranet-auto-continue',
+      type: 'plugin',
+      name: '自动续跑',
+      version: autoContinueManifest.version,
+      description: '遇到可恢复的中断时自动续跑。默认 1 次，可在 DSH 插件页设置次数、暂停会话并查看记录。',
+      compatibility: {
+        os: ['win32', 'darwin', 'linux'],
+        arch: ['x64', 'arm64'],
+      },
+      artifact: {
+        path: artifacts.autoContinue.path,
+        sha256: artifacts.autoContinue.sha256,
+        bytes: artifacts.autoContinue.bytes,
+      },
+      dependencies: [],
+      install: { packageName: 'dsh-intranet-auto-continue' },
+      checks: [{ type: 'plugin-bundle' }],
+      usage: {
+        steps: [
+          '点击“安装”后，DSH 会启用插件。',
+          '如果状态显示“等待重启”，请重启 DSH。',
+          '在 DSH“插件 → 自动续跑”中调整次数或查看记录。',
+        ],
+        inputs: '安装后新产生的人类输入与 DSH 回合事件。',
+        output: '遇到符合条件的失败时，按设置的次数上限自动追加续跑消息。',
+        example: '安装并重启后正常运行任务；遇到超时或传输中断时，插件按宿主事件决定是否追加一次续跑。',
+      },
+      trial: {
+        prompt: '自动续跑是宿主插件，不会通过试用自动发送消息或触发续跑。请查看本条目说明，并在需要时手动点击“安装”。',
+      },
+    },
     {
       id: 'office-enhancement-skill',
       type: 'skill',

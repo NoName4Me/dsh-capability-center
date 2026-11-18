@@ -25,7 +25,7 @@
     <header class="page-head">
       <div class="heading-block">
         <h1>能力中心</h1>
-        <p class="page-intro">从内网安装技能、DSH 插件、Python 库与组合能力。试用只创建新会话草稿，不会自动发送。</p>
+        <p class="page-intro">在内网安装和管理技能、插件、Python 库与能力包。</p>
       </div>
       <section class="core-panel" id="core-panel" aria-label="核心版本">
         <div class="core-version">
@@ -33,7 +33,7 @@
           <strong id="core-version">读取中</strong>
         </div>
         <button class="button button-quiet" id="core-check" type="button" disabled>检查更新</button>
-        <button class="button button-primary" id="core-stage" type="button" hidden>准备更新</button>
+        <button class="button button-primary" id="core-stage" type="button" hidden>下载更新</button>
       </section>
     </header>
 
@@ -51,7 +51,7 @@
     <section class="source-panel" id="source-panel" aria-labelledby="source-heading">
       <div class="source-copy">
         <h2 id="source-heading">内网目录</h2>
-        <p>服务器地址仅保存在当前浏览器；目录、哈希与本机检查均由 DSH 本地 API 完成。</p>
+        <p>离线管理只读取本机已安装的能力，仍可检查或卸载。</p>
       </div>
       <form class="source-form" id="source-form">
         <label for="server-url">分发服务器地址</label>
@@ -59,7 +59,7 @@
           <input id="server-url" name="server-url" type="url" inputmode="url" autocomplete="url"
             placeholder="http://192.168.1.20:8765" spellcheck="false" required>
           <button class="button button-primary" id="connect-button" type="submit">保存并刷新</button>
-          <button class="button button-quiet" id="offline-button" type="button">只看本机</button>
+          <button class="button button-quiet" id="offline-button" type="button">离线管理</button>
         </div>
       </form>
     </section>
@@ -82,7 +82,7 @@
           <button type="button" class="filter" data-filter="skill" aria-pressed="false">技能</button>
           <button type="button" class="filter" data-filter="plugin" aria-pressed="false">插件</button>
           <button type="button" class="filter" data-filter="python" aria-pressed="false">Python 库</button>
-          <button type="button" class="filter" data-filter="composite" aria-pressed="false">组合</button>
+          <button type="button" class="filter" data-filter="composite" aria-pressed="false">能力包</button>
           <button type="button" class="filter" data-filter="installed" aria-pressed="false">已安装</button>
         </div>
         <label class="search" for="search-input">
@@ -99,14 +99,28 @@
         <strong>正在读取能力</strong>
         <span>本机账本无需分发服务器即可管理已安装能力。</span>
       </div>
-      <ol class="capability-list" id="capability-list" aria-label="能力列表"></ol>
+      <ol class="capability-list" id="capability-list" aria-label="能力目录"></ol>
     </section>
 
     <p class="privacy-note">
       <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.8 16 5v4.3c0 3.7-2.4 6.3-6 7.9-3.6-1.6-6-4.2-6-7.9V5z"/><path d="m7.3 10 1.8 1.8 3.8-4"/></svg>
-      能力包由内网服务器提供。安装与检查在本机完成，本机系统信息不会上传到分发服务器。
+      安装文件由内网服务器提供。安装与检查在本机完成，本机系统信息不会上传到分发服务器。
     </p>
   </main>
+  <dialog class="capability-dialog" id="capability-dialog" aria-labelledby="capability-dialog-title">
+    <header class="detail-header">
+      <h2 id="capability-dialog-title"></h2>
+      <form method="dialog">
+        <button class="button button-quiet detail-close" id="capability-dialog-close" type="submit" aria-label="关闭详情">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg>
+        </button>
+      </form>
+    </header>
+    <div class="detail-scroll" id="capability-dialog-scroll">
+      <p class="detail-intro" id="capability-dialog-intro"></p>
+      <div id="capability-dialog-content"></div>
+    </div>
+  </dialog>
   <script src="/capability-center/app.js" defer></script>
 </body>
 </html>

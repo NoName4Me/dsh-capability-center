@@ -46,6 +46,7 @@ const TERMINAL = new Set(['ready', 'restart-required', 'failed'])
 const REQUEST_ID = /^[A-Za-z0-9_-]{8,96}$/u
 const MAX_PROMPT_LENGTH = 4_000
 const LEGACY_IDS = new Set(['report-format', 'dsh-local-sysinfo', 'python-tabulate'])
+const AUTO_CONTINUE_ID = 'dsh-intranet-auto-continue'
 const OFFICE_ROOT_ID = 'office-enhancement'
 const OFFICE_SKILL_ID = 'office-enhancement-skill'
 const PYPDF_ID = 'python-pypdf'
@@ -553,6 +554,7 @@ export class CoreService {
       && (candidate.bundle?.application === 'restart-required'
         || candidate.latestHealth?.status === 'restart-required'))) {
       const item = localDisplayItem(entry)
+      const hasBundleCheck = item.checks.some(check => check.type === 'plugin-bundle')
       const health = await this.runChecks(item, entry).catch(error => ({
         status: 'restart-required',
         detail: `重启后的只读检查尚未成功：${messageOf(error)}`,
@@ -565,11 +567,13 @@ export class CoreService {
           restartReason: null,
         }
         changed = true
-      } else if (health.status !== 'restart-required') {
+      } else if (!hasBundleCheck && health.status !== 'restart-required') {
         entry.latestHealth = {
           status: 'restart-required',
           detail: health.detail,
         }
+      } else if (hasBundleCheck && health.status !== 'restart-required') {
+        changed = true
       }
     }
     if (changed) await this.ledger.write()
@@ -667,6 +671,8 @@ export class CoreService {
         items: catalog.items.map(item => ({
           ...item,
           currentVersion: this.ledger.get(item.id)?.version ?? null,
+          // The existing auto-continue catalog prompt is guidance, not a trial.
+          trialAvailable: item.id !== AUTO_CONTINUE_ID,
           delisted: online !== undefined && !online.items.some(candidate => candidate.id === item.id),
           artifact: item.artifact === undefined ? undefined : {
             path: item.artifact.path,
@@ -1334,7 +1340,7 @@ export class CoreService {
         targetVersion: item.version,
         beforeVersion: old?.version ?? null,
       })
-      const result = await manager.installBundle(artifact, { saveExact: true })
+      const result = await manager.installBundle(artifact, { enabled: true, saveExact: true })
       if (!['applied', 'restart-required', 'overridden'].includes(result?.application)) {
         throw new CapabilityError('plugin-install-failed',
           `插件安装失败：${result?.error?.diagnostic ?? result?.application ?? '无结果'}`)
@@ -1382,9 +1388,14 @@ export class CoreService {
         if (health.status !== 'ready') return health
         continue
       }
-      if (!['skill-discovery', 'named-tool-readonly-call', 'python-import', 'python-function']
+      if (!['plugin-bundle', 'skill-discovery', 'named-tool-readonly-call', 'python-import', 'python-function']
         .includes(check?.type)) {
         return { status: 'failed', detail: '本机账本包含不受支持的检查类型。' }
+      }
+      if (check.type === 'plugin-bundle') {
+        const health = await this.checkPluginBundle(item, entry)
+        if (health.status !== 'ready') return health
+        continue
       }
       if (check.type === 'skill-discovery') {
         try {
@@ -1446,6 +1457,101 @@ export class CoreService {
       }
     }
     return { status: 'ready', detail: '自动检查通过', checkedAt: new Date().toISOString() }
+  }
+
+  async checkPluginBundle(item, entry) {
+    const packageName = item.install?.packageName
+    if (typeof packageName !== 'string' || packageName === '') {
+      return { status: 'failed', detail: '插件检查缺少固定 packageName。' }
+    }
+    const manager = this.pluginManager()
+    if (typeof manager?.listBundles !== 'function') {
+      return { status: 'failed', detail: 'DSH 未提供 pluginManager.listBundles，无法检查插件运行态。' }
+    }
+
+    let bundles
+    try {
+      bundles = await manager.listBundles()
+    } catch (error) {
+      return { status: 'failed', detail: `读取插件清单失败：${messageOf(error)}` }
+    }
+    const bundle = Array.isArray(bundles)
+      ? bundles.find(candidate => candidate?.name === packageName)
+      : undefined
+    if (bundle === undefined) {
+      return { status: 'missing', detail: `DSH 插件清单中不存在 ${packageName}。` }
+    }
+    if (bundle.error !== undefined) {
+      const code = typeof bundle.error?.code === 'string' ? bundle.error.code : 'unknown'
+      return {
+        status: 'failed',
+        detail: `插件 ${packageName} 清单状态失败：${bundle.error.diagnostic ?? code}`,
+      }
+    }
+    if (bundle.installed !== true || bundle.availability === 'missing') {
+      return { status: 'missing', detail: `插件 ${packageName} 未安装或文件缺失。` }
+    }
+    if (bundle.version !== item.version) {
+      return {
+        status: 'failed',
+        detail: `插件版本为 ${bundle.version ?? '未知'}，期望 ${item.version}。`,
+      }
+    }
+    if (bundle.enabled !== true) {
+      return { status: 'disabled', detail: `插件 ${packageName} 已在 DSH 中停用。` }
+    }
+    const rows = Array.isArray(bundle.rows) ? bundle.rows : []
+    if (rows.length === 0) {
+      return { status: 'failed', detail: `插件 ${packageName} 没有可检查的运行行。` }
+    }
+    if (typeof manager.listPlugins !== 'function') {
+      return { status: 'failed', detail: 'DSH 未提供 pluginManager.listPlugins，无法确认插件已激活。' }
+    }
+
+    let plugins
+    try {
+      plugins = await manager.listPlugins()
+    } catch (error) {
+      return { status: 'failed', detail: `读取插件运行态失败：${messageOf(error)}` }
+    }
+    if (!Array.isArray(plugins)) {
+      return { status: 'failed', detail: 'DSH pluginManager.listPlugins 未返回运行态列表。' }
+    }
+    for (const row of rows) {
+      if (typeof row?.entryId !== 'string' || row.entryId === '') {
+        return {
+          status: 'restart-required',
+          detail: `插件 ${packageName} 已保存，等待 Loader 启动运行行。`,
+        }
+      }
+      const plugin = plugins.find(candidate => candidate?.entryId === row.entryId)
+      if (plugin === undefined) {
+        return {
+          status: 'restart-required',
+          detail: `插件 ${packageName} 的运行行尚未进入 Loader。`,
+        }
+      }
+      if (plugin.enabled !== true) {
+        return { status: 'disabled', detail: `插件 ${packageName} 的运行行已停用。` }
+      }
+      if (plugin.fiberPhase === 'failed') {
+        return { status: 'failed', detail: `插件 ${packageName} 的运行行启动失败。` }
+      }
+      if (plugin.fiberPhase !== 'active') {
+        return {
+          status: 'restart-required',
+          detail: `插件 ${packageName} 的运行态为 ${String(plugin.fiberPhase)}，等待激活。`,
+        }
+      }
+    }
+    if (entry.bundle?.application === 'restart-required') {
+      entry.bundle = { ...entry.bundle, application: 'applied', restartReason: null }
+    }
+    return {
+      status: 'ready',
+      detail: `插件 ${packageName}@${item.version} 已安装并激活。`,
+      checkedAt: new Date().toISOString(),
+    }
   }
 
   async checkPypdf(item, entry) {
@@ -1947,6 +2053,9 @@ export class CoreService {
         'component-only',
         '隐藏组件不能单独试用，请使用 office-enhancement。',
       )
+    }
+    if (item.id === AUTO_CONTINUE_ID) {
+      throw new CapabilityError('trial-unavailable', '自动续跑会在实际会话中生效。')
     }
     const entry = this.ledger.get(itemId)
     const state = await this.quickState(item, entry)
