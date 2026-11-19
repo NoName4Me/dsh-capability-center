@@ -269,6 +269,7 @@ export class CoreService {
     this.recoveryMessages = []
     this.legacyManagerEnabled = false
     this.faultInjection = runtime.faultInjection
+    this.devDistributionUrl = runtime.devDistributionUrl
   }
 
   async initialize() {
@@ -1417,12 +1418,12 @@ export class CoreService {
             : { status: 'failed', detail: 'DSH 未提供工具执行接口' }
         }
         try {
-          const result = await this.ctx.tools.execute({
-            name: check.tool,
-            arguments: {},
-            callId: `capability-center-check-${randomUUID()}`,
-            signal: AbortSignal.timeout(20_000),
-          })
+          const result = await this.executeTool(
+            check.tool,
+            {},
+            AbortSignal.timeout(20_000),
+            'check',
+          )
           if (result === undefined || result === null || result.isError !== false
             || !(Object.hasOwn(result, 'value')
               || (Array.isArray(result.content) && result.content.length > 0))) {
@@ -1644,12 +1645,12 @@ export class CoreService {
     if (typeof this.ctx.tools?.execute !== 'function') {
       throw new CapabilityError('python-runtime-missing', 'DSH 未提供 tools.execute。')
     }
-    const result = await this.ctx.tools.execute({
-      name: 'load_workspace_dependencies',
-      arguments: {},
-      callId: `capability-center-python-${randomUUID()}`,
-      signal: AbortSignal.timeout(30_000),
-    })
+    const result = await this.executeTool(
+      'load_workspace_dependencies',
+      {},
+      AbortSignal.timeout(30_000),
+      'python',
+    )
     if (result?.isError === true || typeof result?.value?.python !== 'string'
       || typeof result?.value?.pythonPackages !== 'string') {
       throw new CapabilityError('python-runtime-missing', 'DSH 没有返回 Python 解释器与 pythonPackages。')
@@ -1668,6 +1669,28 @@ export class CoreService {
       throw new CapabilityError('python-runtime-missing', `Python 解释器无法执行：${messageOf(error)}`)
     }
     return { ...result.value, version: pythonVersion }
+  }
+
+  async executeTool(name, args, signal, purpose) {
+    const callId = `capability-center-${purpose}-${randomUUID()}`
+    if (typeof this.ctx.tools.setExecutor === 'function') {
+      const response = await this.ctx.tools.execute({
+        calls: [{
+          type: 'tool-call',
+          name,
+          arguments: JSON.stringify(args ?? {}),
+          id: callId,
+        }],
+        signal,
+      })
+      return response?.results?.[0]?.result
+    }
+    return await this.ctx.tools.execute({
+      name,
+      arguments: args ?? {},
+      callId,
+      signal,
+    })
   }
 
   async pythonImport(runtime, module) {
@@ -2216,7 +2239,17 @@ export class CoreService {
           return true
         }
         const [file, type] = STATIC.get(route)
-        const body = await readFile(join(PAGE_ROOT, file))
+        let body = await readFile(join(PAGE_ROOT, file))
+        if (file === 'index.html' && typeof this.devDistributionUrl === 'string') {
+          const meta = `<meta name="capability-center-dev-distribution-url" content="${
+            this.devDistributionUrl
+              .replaceAll('&', '&amp;')
+              .replaceAll('"', '&quot;')
+              .replaceAll('<', '&lt;')
+              .replaceAll('>', '&gt;')
+          }">`
+          body = Buffer.from(body.toString('utf8').replace('</head>', `  ${meta}\n</head>`))
+        }
         res.statusCode = 200
         res.setHeader('content-type', type)
         res.setHeader('cache-control', 'no-cache')

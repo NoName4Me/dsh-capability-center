@@ -204,6 +204,8 @@ test('UI source exposes category filters, card details, update results and offli
   assert.match(app, /trialAvailable !== false/u)
   assert.match(app, /label: '已安装'/u)
   assert.match(app, /state\.localOnly \? '' : state\.serverUrl/u)
+  assert.match(app, /devDistributionUrl\(\) \|\| localStorage\.getItem\(STORAGE_KEY\)/u)
+  assert.match(app, /capability-center-dev-distribution-url/u)
   assert.match(css, /\.capability-list\s*\{[^}]*grid-template-columns: repeat\(auto-fill/u)
   assert.match(app, /草稿尚未发送/u)
   assert.match(app, /legacyManagerEnabled/u)

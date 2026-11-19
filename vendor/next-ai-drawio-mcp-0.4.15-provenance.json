@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "package": "@next-ai-drawio/mcp-server",
+  "version": "0.4.15",
+  "archive": "next-ai-drawio-mcp-0.4.15.tgz",
+  "archiveSha256": "d1d40c71ad023f7751399d63be5016968cf9c1db96d8275f3a6ef34d4f5bd184",
+  "registry": "https://registry.npmjs.org/@next-ai-drawio%2Fmcp-server/0.4.15",
+  "repository": "https://github.com/DayuanJiang/next-ai-draw-io",
+  "license": "Apache-2.0",
+  "vendoredPath": "package/dist/drawio",
+  "drawioVersion": "v32.0.2",
+  "drawioRepository": "https://github.com/jgraph/drawio",
+  "notes": "Build extracts only package/dist/drawio from the pinned npm archive. The draw.io LICENSE, img/LICENSE, shapes/LICENSE and stencils/LICENSE remain in that tree."
+}

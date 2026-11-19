@@ -10,12 +10,16 @@ import {
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { test } from 'node:test'
-import { EngineSupervisor } from '../src/bootstrap/lib/supervisor.js'
+import {
+  EngineSupervisor,
+  normalizeDevDistributionUrl,
+} from '../src/bootstrap/lib/supervisor.js'
 import { readZip } from '../src/engine/lib/archive.js'
 import { readBoundedUrl } from '../src/bootstrap/lib/http-transport.js'
 import {
   createZip,
   dist,
+  fakeContext,
   sha256,
   startFileServer,
   tempRoot,
@@ -263,6 +267,138 @@ test('core staging writes its marker before commit and refuses immutable version
     })
   } finally {
     await server.close()
+    await rm(temp, { recursive: true, force: true })
+  }
+})
+
+test('dev seed activation reads the bundled seed instead of a stale same-version release cache', async () => {
+  const temp = await tempRoot('capability-center-core-dev-seed-')
+  const home = join(temp, 'home')
+  const packageRoot = await seedPackageRoot(temp)
+  await writeCoreDirectory(
+    join(home, 'capability-center', 'releases', '0.2.0'),
+    '0.2.0',
+    'fail',
+  )
+  try {
+    await withHome(home, async () => {
+      const supervisor = new EngineSupervisor(supervisorContext(), {
+        packageRoot,
+        devSeed: true,
+        devDistributionUrl: undefined,
+      })
+      const status = await supervisor.ready
+      assert.equal(status.ready, true)
+      assert.equal(status.current.version, '0.2.0')
+      assert.equal(status.current.source, 'dev-seed')
+      assert.equal(supervisor.engine.version, '0.2.0')
+      await supervisor.dispose()
+    })
+  } finally {
+    await rm(temp, { recursive: true, force: true })
+  }
+})
+
+test('dev seed recovery resolves the bundled seed when rolling back a failed current release', async () => {
+  const temp = await tempRoot('capability-center-core-dev-seed-recovery-')
+  const home = join(temp, 'home')
+  const packageRoot = await seedPackageRoot(temp)
+  await writeCoreDirectory(
+    join(home, 'capability-center', 'releases', '0.2.0'),
+    '0.2.0',
+    'fail',
+  )
+  await mkdir(join(home, 'capability-center'), { recursive: true })
+  await writeFile(join(home, 'capability-center', 'engine-state.json'), JSON.stringify({
+    schemaVersion: 1,
+    current: { version: '0.2.1', source: 'http://127.0.0.1/core.zip' },
+    previous: { version: '0.2.0', source: 'seed' },
+    pending: null,
+    bootAttempt: null,
+    lastFailure: null,
+    updatedAt: new Date().toISOString(),
+  }))
+  try {
+    await withHome(home, async () => {
+      const supervisor = new EngineSupervisor(supervisorContext(), {
+        packageRoot,
+        devSeed: true,
+        devDistributionUrl: undefined,
+      })
+      const status = await supervisor.ready
+      assert.equal(status.ready, true)
+      assert.equal(status.current.version, '0.2.0')
+      assert.equal(status.current.source, 'seed')
+      assert.equal(supervisor.engine.version, '0.2.0')
+      await supervisor.dispose()
+    })
+  } finally {
+    await rm(temp, { recursive: true, force: true })
+  }
+})
+
+test('development distribution URL is loopback-only and the page meta appears only when configured', async () => {
+  assert.equal(
+    normalizeDevDistributionUrl('http://127.0.0.1:8765'),
+    'http://127.0.0.1:8765/',
+  )
+  assert.throws(
+    () => normalizeDevDistributionUrl('http://192.168.1.2:8765/'),
+    error => error.code === 'invalid-dev-distribution-url',
+  )
+  assert.throws(
+    () => normalizeDevDistributionUrl('https://127.0.0.1:8765/'),
+    error => error.code === 'invalid-dev-distribution-url',
+  )
+
+  const temp = await tempRoot('capability-center-dev-meta-')
+  const home = join(temp, 'home')
+  const files = readZip(await readFile(join(dist, 'core', 'capability-center-core-0.2.6.zip')))
+  const coreRoot = join(temp, 'release')
+  for (const [name, bytes] of files) {
+    const target = join(coreRoot, ...name.split('/'))
+    await mkdir(dirname(target), { recursive: true })
+    await writeFile(target, bytes)
+  }
+  const { CoreService: BuiltCoreService } = await import(
+    pathToFileURL(join(coreRoot, 'engine', 'service.js')).href
+  )
+  const page = async devDistributionUrl => {
+    const service = new BuiltCoreService(fakeContext(), {
+      version: '0.2.6',
+      dataRoot: join(home, 'capability-center'),
+      http: { readBoundedUrl },
+      devDistributionUrl,
+    })
+    await service.initialize()
+    const chunks = []
+    const headers = new Map()
+    const req = {
+      method: 'GET',
+      headers: {},
+      async *[Symbol.asyncIterator]() {},
+    }
+    const res = {
+      statusCode: 0,
+      setHeader(name, value) { headers.set(name.toLowerCase(), String(value)) },
+      end(value = '') { chunks.push(Buffer.from(value)) },
+    }
+    assert.equal(await service.handle(req, res, '/', new URL('http://127.0.0.1/')), true)
+    assert.equal(res.statusCode, 200)
+    await service.dispose()
+    return Buffer.concat(chunks).toString('utf8')
+  }
+  try {
+    await withHome(home, async () => {
+      const development = await page('http://127.0.0.1:8765/')
+      assert.match(
+        development,
+        /<meta name="capability-center-dev-distribution-url" content="http:\/\/127\.0\.0\.1:8765\/">/u,
+      )
+      const production = await page(undefined)
+      assert.doesNotMatch(production, /capability-center-dev-distribution-url/u)
+    })
+  } finally {
     await rm(temp, { recursive: true, force: true })
   }
 })

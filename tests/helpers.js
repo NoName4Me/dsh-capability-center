@@ -121,25 +121,44 @@ export function runtimeSkills({ ready = true } = {}) {
 export function fakeContext(options = {}) {
   const calls = []
   const bundles = new Map(options.bundles ?? [])
+  const toolValue = async request => {
+    if (request.name === 'load_workspace_dependencies') {
+      if (options.runtime === undefined) {
+        return { isError: true, error: { code: 'fixture' }, content: [{ type: 'text', text: 'missing' }] }
+      }
+      return {
+        isError: false,
+        value: options.runtime,
+        content: [{ type: 'text', text: JSON.stringify(options.runtime) }],
+      }
+    }
+    if (options.toolResult !== undefined) return await options.toolResult(request)
+    return { isError: true, error: { code: 'fixture-tool' }, content: [{ type: 'text', text: 'missing' }] }
+  }
+  const tools = {
+    async execute(request) {
+      calls.push({ kind: 'tool', request })
+      if (options.batchTools === true) {
+        const results = []
+        for (const call of request.calls) {
+          results.push({
+            callId: call.id,
+            result: await toolValue({
+              name: call.name,
+              arguments: JSON.parse(call.arguments),
+              callId: call.id,
+            }),
+          })
+        }
+        return { results }
+      }
+      return await toolValue(request)
+    },
+  }
+  if (options.batchTools === true) tools.setExecutor = () => undefined
   const context = {
     skills: options.skills ?? runtimeSkills(),
-    tools: {
-      async execute(request) {
-        calls.push({ kind: 'tool', request })
-        if (request.name === 'load_workspace_dependencies') {
-          if (options.runtime === undefined) {
-            return { isError: true, error: { code: 'fixture' }, content: [{ type: 'text', text: 'missing' }] }
-          }
-          return {
-            isError: false,
-            value: options.runtime,
-            content: [{ type: 'text', text: JSON.stringify(options.runtime) }],
-          }
-        }
-        if (options.toolResult !== undefined) return await options.toolResult(request)
-        return { isError: true, error: { code: 'fixture-tool' }, content: [{ type: 'text', text: 'missing' }] }
-      },
-    },
+    tools,
     pluginManager: {
       async listBundles() {
         return [...bundles.values()].map(value => ({ ...value }))

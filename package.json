@@ -6,9 +6,10 @@
   "scripts": {
     "build": "node build.mjs",
     "test": "node build.mjs && node --test --test-concurrency=1 tests/*.test.js",
+    "dev": "exec node tools/dev.mjs",
+    "dev:preview": "npm run build && node tools/preview.mjs",
     "publish:core": "node tools/publish.mjs core",
     "publish:catalog": "node tools/publish.mjs catalog",
-    "dev": "npm run build && node tools/preview.mjs",
     "typecheck": "tsc --noEmit"
   },
   "engines": {

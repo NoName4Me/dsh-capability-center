@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
+import { gunzipSync } from 'node:zlib'
 import {
   cp,
   mkdir,
@@ -60,6 +61,65 @@ async function sha256(path) {
   return createHash('sha256').update(await readFile(path)).digest('hex')
 }
 
+function tarFiles(bytes) {
+  const archive = gunzipSync(bytes)
+  const files = new Map()
+  let offset = 0
+  while (offset + 512 <= archive.byteLength) {
+    const header = archive.subarray(offset, offset + 512)
+    if (header.every(byte => byte === 0)) break
+    const field = (start, length) => header.subarray(start, start + length)
+      .toString('utf8')
+      .replace(/\0.*$/u, '')
+    const name = field(0, 100)
+    const prefix = field(345, 155)
+    const path = prefix === '' ? name : `${prefix}/${name}`
+    const sizeText = field(124, 12).trim()
+    const size = sizeText === '' ? 0 : Number.parseInt(sizeText, 8)
+    const type = field(156, 1) || '0'
+    if (!Number.isSafeInteger(size) || size < 0) throw new Error(`Invalid tar entry size for ${path}`)
+    const bodyStart = offset + 512
+    const bodyEnd = bodyStart + size
+    if (bodyEnd > archive.byteLength) throw new Error(`Truncated tar entry ${path}`)
+    if (type !== '0' && type !== '') throw new Error(`Unsupported tar entry type ${type} for ${path}`)
+    files.set(path, archive.subarray(bodyStart, bodyEnd))
+    offset = bodyStart + Math.ceil(size / 512) * 512
+  }
+  return files
+}
+
+async function extractDrawio(archivePath, target) {
+  const provenance = JSON.parse(await readFile(
+    join(root, 'vendor', 'next-ai-drawio-mcp-0.4.15-provenance.json'),
+    'utf8',
+  ))
+  const actual = await sha256(archivePath)
+  if (actual !== provenance.archiveSha256) {
+    throw new Error(`draw.io vendor archive hash mismatch: ${actual}`)
+  }
+  const files = tarFiles(await readFile(archivePath))
+  const prefix = `${provenance.vendoredPath}/`
+  let count = 0
+  for (const [path, bytes] of files) {
+    if (!path.startsWith(prefix)) continue
+    const relative = path.slice(prefix.length)
+    if (relative === '' || relative.split('/').some(part => part === '' || part === '..')) {
+      throw new Error(`Unsafe draw.io archive path: ${path}`)
+    }
+    const output = join(target, ...relative.split('/'))
+    await mkdir(dirname(output), { recursive: true })
+    await writeFile(output, bytes)
+    count += 1
+  }
+  if (count === 0) throw new Error('draw.io archive contains no editor files')
+  const version = (await readFile(join(target, '.version'), 'utf8')).trim()
+  if (version !== provenance.drawioVersion) {
+    throw new Error(`draw.io version mismatch: ${version}`)
+  }
+  await readFile(join(target, 'LICENSE'))
+  return { count, provenance }
+}
+
 await rm(work, { recursive: true, force: true })
 await rm(offlineArchive, { force: true })
 await mkdir(work, { recursive: true })
@@ -108,6 +168,31 @@ if (typeof packedAutoContinue?.filename !== 'string') {
   throw new Error('Auto-continue npm pack returned no filename')
 }
 
+const drawioPluginBuild = join(work, 'drawio-plugin-build')
+await cp(
+  join(root, 'src', 'capabilities', 'capability-center-drawio'),
+  drawioPluginBuild,
+  { recursive: true },
+)
+const drawioManifest = JSON.parse(await readFile(join(drawioPluginBuild, 'package.json'), 'utf8'))
+const drawioAssets = await extractDrawio(
+  join(root, 'vendor', 'next-ai-drawio-mcp-0.4.15.tgz'),
+  join(drawioPluginBuild, 'drawio'),
+)
+await cp(
+  join(root, 'vendor', 'next-ai-drawio-mcp-0.4.15-provenance.json'),
+  join(drawioPluginBuild, 'drawio-provenance.json'),
+)
+const packedDrawio = JSON.parse(run('npm', ['pack', '--json', '--pack-destination', packages], {
+  cwd: drawioPluginBuild,
+}))[0]
+if (typeof packedDrawio?.filename !== 'string') {
+  throw new Error('draw.io plugin npm pack returned no filename')
+}
+if (drawioAssets.count < 2_000) {
+  throw new Error(`draw.io editor extraction is incomplete: ${drawioAssets.count} files`)
+}
+
 const officeSkillSource = join(root, 'src', 'capabilities', 'office-enhancement')
 const officeSkillBuild = join(work, 'office-skill-build')
 const officeSkillRoot = join(officeSkillBuild, 'office-enhancement-skill')
@@ -142,6 +227,7 @@ await cp(
 const artifacts = {
   bootstrap: await artifact(join(packages, packedBootstrap.filename)),
   autoContinue: await artifact(join(packages, packedAutoContinue.filename)),
+  drawio: await artifact(join(packages, packedDrawio.filename)),
   officeSkill: await artifact(officeSkillZip),
   pypdf: await artifact(join(packages, 'pypdf-7.1.0-py3-none-any.whl')),
   core: await artifact(coreZip),
@@ -183,6 +269,42 @@ const catalog = {
       },
       trial: {
         prompt: '自动续跑是宿主插件，不会通过试用自动发送消息或触发续跑。请查看本条目说明，并在需要时手动点击“安装”。',
+      },
+    },
+    {
+      id: 'capability-center-drawio',
+      type: 'plugin',
+      name: 'draw.io 画布',
+      version: drawioManifest.version,
+      description: '在原生会话左侧持续显示同源离线 draw.io，右侧复用原聊天和输入框；模型可按选区 ID 更新原图，支持样式与结构编辑。',
+      compatibility: {
+        os: ['win32', 'darwin', 'linux'],
+        arch: ['x64', 'arm64'],
+        dsh: '0.2.1-rc.2',
+      },
+      artifact: {
+        path: artifacts.drawio.path,
+        sha256: artifacts.drawio.sha256,
+        bytes: artifacts.drawio.bytes,
+      },
+      dependencies: [],
+      install: { packageName: 'capability-center-drawio' },
+      checks: [{ type: 'plugin-bundle' }],
+      usage: {
+        steps: [
+          '安装后在对话中让模型调用 drawio_create 创建画板。',
+          '创建时自动进入画布。左侧使用中文编辑器，右侧继续使用原会话和输入框。',
+          '完成后点击回复下方卡片的“打开画布”重开该图，也可从会话头部进入当前画布。',
+          '框选图元后在右侧直接描述样式或流程变更。',
+          '框选后可直接在右侧输入并发送；宿主会先等待精确选区写入，再通过 plugin context 把绑定的画板、revision 和图元 ID 交给模型。',
+          '需要独立文件时，在画布顶部点击“导出 .drawio”；服务端持久化仍是 DSH_HOME 下的原子 JSON 记录。',
+        ],
+        inputs: '节点的稳定 ID、标签、坐标、尺寸和样式，连线端点，以及 draw.io 当前选区。',
+        output: '会话绑定的同源 draw.io 画板、修订号、精确选区与原子更新结果。',
+        example: '框选两个节点并输入“把这两个改蓝，并把第三步移到它们之间”，模型读取选区后更新样式和连线。',
+      },
+      trial: {
+        prompt: 'draw.io 画布是宿主插件。安装并重启 DSH 后，在普通对话中让模型创建一张包含三个步骤的流程图，再通过消息卡片进入画布检查。不要建议公网 draw.io 或联网加载资源。',
       },
     },
     {

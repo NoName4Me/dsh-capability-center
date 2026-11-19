@@ -32,7 +32,7 @@ function crc32(buffer) {
   return (crc ^ 0xffffffff) >>> 0
 }
 
-function entriesOf(bytes) {
+function entriesOf(bytes, maxFileBytes) {
   if (bytes.length < 22 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) {
     throw new ArchiveError('invalid-archive', '制品不是 ZIP 格式。')
   }
@@ -82,7 +82,7 @@ function entriesOf(bytes) {
     }
     if (names.has(name)) throw new ArchiveError('invalid-archive', `ZIP 包含重复路径：${name}`)
     names.add(name)
-    if (size > MAX_FILE_BYTES) throw new ArchiveError('archive-too-large', `ZIP 文件过大：${name}`)
+    if (size > maxFileBytes) throw new ArchiveError('archive-too-large', `ZIP 文件过大：${name}`)
     unpacked += size
     if (unpacked > MAX_UNPACKED_BYTES) throw new ArchiveError('archive-too-large', 'ZIP 解压后体积过大。')
     result.push({ name, method, checksum, compressedSize, size, localOffset })
@@ -91,9 +91,12 @@ function entriesOf(bytes) {
   return result
 }
 
-export function readZip(bytes) {
+export function readZip(bytes, { maxFileBytes = MAX_FILE_BYTES } = {}) {
+  if (!Number.isSafeInteger(maxFileBytes) || maxFileBytes <= 0) {
+    throw new ArchiveError('invalid-archive', 'ZIP 单文件上限无效。')
+  }
   const files = new Map()
-  for (const entry of entriesOf(bytes)) {
+  for (const entry of entriesOf(bytes, maxFileBytes)) {
     if (entry.name.endsWith('/')) continue
     const offset = entry.localOffset
     if (offset + 30 > bytes.length || bytes.readUInt32LE(offset) !== 0x04034b50) {

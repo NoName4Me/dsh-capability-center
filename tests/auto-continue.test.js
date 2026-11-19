@@ -902,7 +902,10 @@ test('offline package, artifact manifest and ZIP distribute the catalog plugin T
   })
   assert.equal(sha256(bytes), artifactManifest.artifacts.autoContinue.sha256)
 
-  const archive = readZip(await readFile(join(root, 'capability-center-offline.zip')))
+  const archive = readZip(
+    await readFile(join(root, 'capability-center-offline.zip')),
+    { maxFileBytes: 32 * 1024 * 1024 },
+  )
   const offlinePath = `capability-center/packages/dsh-intranet-auto-continue-${AUTO_VERSION}.tgz`
   assert.ok(archive.has(offlinePath))
   assert.equal(sha256(archive.get(offlinePath)), artifactManifest.artifacts.autoContinue.sha256)

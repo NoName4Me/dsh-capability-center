@@ -26,6 +26,8 @@ export const CORE_PACKAGE_NAME = 'capability-center-core'
 export const TARGET_DSH_VERSION = '0.2.1-rc.2'
 const INDEX_MAX_BYTES = 1024 * 1024
 const CORE_ARCHIVE_MAX_BYTES = 32 * 1024 * 1024
+const DEV_DISTRIBUTION_META_ENV = 'CAPABILITY_CENTER_DEV_DISTRIBUTION_URL'
+const DEV_SEED_ENV = 'CAPABILITY_CENTER_DEV_SEED'
 
 function dshHome() {
   const configured = String(process.env.DSH_HOME ?? '').trim()
@@ -48,6 +50,30 @@ export function normalizeServerUrl(raw) {
   } catch {
     throw Object.assign(new Error('服务器地址必须是完整且不含账号、查询参数或锚点的 http(s) URL。'), {
       code: 'invalid-server',
+    })
+  }
+  return url.href
+}
+
+export function normalizeDevDistributionUrl(raw) {
+  const value = String(raw ?? '').trim()
+  if (value === '') return undefined
+  let url
+  try {
+    url = new URL(value)
+    if (url.protocol !== 'http:'
+      || !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)
+      || url.username
+      || url.password
+      || url.search
+      || url.hash
+      || url.port === '') {
+      throw new Error('invalid')
+    }
+    url.pathname = `${url.pathname.replace(/\/+$/u, '')}/`
+  } catch {
+    throw Object.assign(new Error('开发分发地址必须是带端口的本机回环 HTTP URL。'), {
+      code: 'invalid-dev-distribution-url',
     })
   }
   return url.href
@@ -164,6 +190,8 @@ export class EngineSupervisor {
     packageRoot,
     http = { readBoundedUrl },
     now = () => new Date().toISOString(),
+    devSeed = process.env[DEV_SEED_ENV] === '1',
+    devDistributionUrl = normalizeDevDistributionUrl(process.env[DEV_DISTRIBUTION_META_ENV]),
   }) {
     this.ctx = ctx
     this.packageRoot = packageRoot
@@ -172,6 +200,8 @@ export class EngineSupervisor {
     this.statePath = join(this.root, 'engine-state.json')
     this.http = http
     this.now = now
+    this.devSeed = devSeed
+    this.devDistributionUrl = devDistributionUrl
     this.engine = undefined
     this.fiber = undefined
     this.disposed = false
@@ -201,6 +231,7 @@ export class EngineSupervisor {
     const source = join(this.packageRoot, 'engine-seed')
     const manifest = JSON.parse(await readFile(join(source, 'manifest.json'), 'utf8'))
     if (!validateCoreManifest(manifest)) throw new Error('内置核心种子清单无效。')
+    if (this.devSeed) return manifest
     const target = join(this.releasesRoot, manifest.version)
     try {
       await readFile(join(target, 'manifest.json'))
@@ -218,8 +249,15 @@ export class EngineSupervisor {
       if (this.disposed) return { ready: false, error: 'supervisor-disposed' }
       const seed = await this.ensureSeed()
       let state = await this.state()
-      if (state.current === null) {
-        state = await this.writeState({ ...state, current: { version: seed.version, source: 'seed' } })
+      const seedSource = this.devSeed ? 'dev-seed' : 'seed'
+      if (state.current === null
+        || (this.devSeed
+          && state.current.version === seed.version
+          && ['seed', 'seed-fallback', 'dev-seed'].includes(state.current.source))) {
+        state = await this.writeState({
+          ...state,
+          current: { version: seed.version, source: seedSource },
+        })
       }
       if (state.bootAttempt !== null && state.bootAttempt !== undefined) {
         const attempted = state.bootAttempt
@@ -273,9 +311,13 @@ export class EngineSupervisor {
       }
       if (this.disposed) return { ready: false, error: 'supervisor-disposed' }
       if (this.engine === undefined && state.current !== null) {
-        const activated = await this.tryActivate(state.current)
+        const seedRoot = this.activationRoot(state.current, seed)
+        const activated = await this.tryActivate(state.current, seedRoot)
         if (!activated && state.previous !== null) {
-          const recovered = await this.tryActivate(state.previous)
+          const recovered = await this.tryActivate(
+            state.previous,
+            this.activationRoot(state.previous, seed),
+          )
           if (recovered) {
             state = await this.writeState({
               ...state,
@@ -287,8 +329,12 @@ export class EngineSupervisor {
         }
       }
       if (this.engine === undefined) {
-        const seedFallback = { version: seed.version, source: 'seed-fallback' }
-        if (await this.tryActivate(seedFallback)) {
+        const seedFallback = {
+          version: seed.version,
+          source: this.devSeed ? 'dev-seed' : 'seed-fallback',
+        }
+        const seedRoot = this.devSeed ? join(this.packageRoot, 'engine-seed') : undefined
+        if (await this.tryActivate(seedFallback, seedRoot)) {
           state = await this.writeState({ ...state, current: seedFallback })
         }
       }
@@ -298,7 +344,16 @@ export class EngineSupervisor {
     }
   }
 
-  async tryActivate(entry) {
+  activationRoot(entry, seed) {
+    if (this.devSeed
+      && entry.version === seed.version
+      && ['dev-seed', 'seed', 'seed-fallback'].includes(entry.source)) {
+      return join(this.packageRoot, 'engine-seed')
+    }
+    return undefined
+  }
+
+  async tryActivate(entry, sourceRoot) {
     if (this.disposed) return false
     if (entry === null || typeof entry?.version !== 'string') return false
     if (this.fiber !== undefined) {
@@ -307,9 +362,10 @@ export class EngineSupervisor {
       this.fiber = undefined
       await oldFiber.dispose?.()
     }
-    const modulePath = join(this.releasesRoot, entry.version, 'engine', 'index.js')
+    const releaseRoot = sourceRoot ?? join(this.releasesRoot, entry.version)
+    const modulePath = join(releaseRoot, 'engine', 'index.js')
     try {
-      const manifest = JSON.parse(await readFile(join(this.releasesRoot, entry.version, 'manifest.json'), 'utf8'))
+      const manifest = JSON.parse(await readFile(join(releaseRoot, 'manifest.json'), 'utf8'))
       if (!validateCoreManifest(manifest)) return false
       const moduleUrl = pathToFileURL(modulePath)
       moduleUrl.searchParams.set('v', `${manifest.version}-${randomUUID()}`)
@@ -322,6 +378,7 @@ export class EngineSupervisor {
         version: manifest.version,
         dataRoot: this.root,
         http: this.http,
+        devDistributionUrl: this.devDistributionUrl,
         setEngine: engine => { candidateEngine = engine },
       }
       const fiber = this.ctx.plugin(module, { runtime })

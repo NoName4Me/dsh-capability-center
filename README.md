@@ -6,26 +6,40 @@
 
 [项目文档索引](docs/README.md)
 
-## 本地预览 UI
+## 本地开发
 
-在源码仓库根目录运行以下命令。需要 Node.js 22 或更新版本，以及 PATH 中的 `python3`。也可以用 `CAPABILITY_CENTER_BUILD_PYTHON` 指定构建用的 Python。
+在源码仓库根目录运行以下命令。需要 Node.js 22 或更新版本、PATH 中的 `python3`，以及 DSH CLI `0.2.2-rc.3`。也可以用 `CAPABILITY_CENTER_BUILD_PYTHON` 指定构建用的 Python。
 
 ```sh
 npm ci
 npm run dev
 ```
 
-打开 [能力中心本地预览](http://127.0.0.1:4173/capability-center/)。预览使用当前构建的真实页面和目录，可以搜索、筛选和查看详情。修改源码后，按 Ctrl+C 停止，再运行 `npm run dev`。端口可通过 `CAPABILITY_CENTER_PREVIEW_PORT` 指定。
+`npm run dev` 会先取得开发锁，再重新构建能力中心，把完整分发目录快照到 `.dev/distribution`，从该快照在本机 `127.0.0.1` 随机端口启动真实的 `start-server.py`，将本次构建的 bootstrap TGZ 以内容哈希文件名离线安装到隔离的 `.dev/dsh-home` web profile，然后启动官方 Web DSH。运行中的实例不读取共享 `dist/`，因此之后执行 `npm test`、`npm run build` 或 `npm run dev:preview` 不会替换其目录。默认 Web 根地址是 [http://127.0.0.1:4174/](http://127.0.0.1:4174/)；DSH 默认会打开带认证的根地址。进入 Web DSH 后，从侧栏打开“能力中心”。不要直接打开 `/capability-center/` 的 iframe 地址，未经过 DSH 根页面认证时该地址会返回 401。
+
+随机分发端口会在每次启动时写入当前构建页面的开发专用 meta，因此首次访问和新构建重启后都会自动预填地址。DSH 根页面负责认证，能力中心的同源 iframe 负责页面和试用草稿桥。
+
+开发运行使用 `.dev/dsh-home` 持久保存 web profile、插件和安装记录，该目录已加入 `.gitignore`。开发锁阻止同一仓库并发启动两个 `npm run dev`。DSH 退出、启动失败、分发服务退出或按 Ctrl+C 时，启动器会等待构建、安装和 Web 子进程结束并清理分发子进程与开发锁，下一次启动会重新安装当前构建。进程被强制终止留下 `.dev/dev.lock` 时，下次启动会检查其中记录的 PID，自动清理已退出进程的旧锁。
+
+常用参数如下。参数放在 `--` 后，例如 `npm run dev -- --no-open --web-port 4180`。
+
+```sh
+npm run dev -- --no-open
+npm run dev -- --web-port 4180
+npm run dev -- --web-port 0
+npm run dev -- --distribution-port 8765
+npm run dev -- --dsh /path/to/dsh
+```
+
+DSH 查找顺序是 `--dsh`、`CAPABILITY_CENTER_DSH_BIN`、PATH 中的 `dsh`，最后是 macOS 桌面路径 `/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh`。可用 `CAPABILITY_CENTER_DEV_DSH_HOME` 覆盖隔离 home，但同一仓库仍只允许一个开发实例。
 
 页面交互源码位于 [app.ts](src/engine/page/app.ts)。`npm run typecheck` 运行 TypeScript 严格类型检查，构建时会编译出 DSH 加载的 `page/app.js`。
 
-需要实际安装、卸载、试用或检查核心更新时，在预览构建完成后，另开终端运行：
+仅查看页面和目录时可运行 `npm run dev:preview`。它保留原预览行为，默认地址为 [http://127.0.0.1:4173/capability-center/](http://127.0.0.1:4173/capability-center/)，端口可通过 `CAPABILITY_CENTER_PREVIEW_PORT` 指定。
 
-```sh
-python3 dist/start-server.py --host 127.0.0.1 --port 8765
-```
+macOS 桌面自带 DSH 没有在官方 Web profile 中启用 `load_workspace_dependencies`。启动器会通过 CLI 的 realpath 识别同一安装内的 `Contents/Resources/runtime/primary-runtime`，在 `.dev/workspace-dependencies.patch.json` 生成仅开发使用的 overlay，并用 `--patch` 挂载 workspace-dependencies。首次使用“Office 增强”时，DSH 会把约 310 MB 的运行时复制到隔离 home 下的 `dsh-runtimes/`，之后复用；应用 bundle 和分发制品不会被修改。其他来源的通用 `dsh` CLI 没有可确认的 primary runtime 时不生成 overlay，此时“Office 增强”的依赖准备不可用，自动续跑不受影响。
 
-首次使用时，在 DSH 的“插件 → 添加插件”粘贴终端打印的 `Initial plugin URL`，启用插件并按提示重启。在 DSH 侧栏打开“能力中心”，填入 `http://127.0.0.1:8765/` 并刷新。已安装稳定引导插件时，也可在页面检查并准备新核心，重启 DSH 后生效。
+当前开发启动器只支持 POSIX shell，并在 macOS 上使用桌面自带 DSH `0.2.2-rc.3` 验证。Windows 内网终端目标版本仍以 [DESIGN.md](DESIGN.md#内网终端环境) 为准，本轮不能在 Win10 `0.2.1-rc.2` 或 Win7 `0.2.1-rc.5` 实机验证 Node/Python 路径、pnpm 离线安装和进程信号行为。
 
 ## 离线包内容
 

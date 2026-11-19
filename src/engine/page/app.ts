@@ -6,6 +6,7 @@
   const OPEN_DRAFT = 'capability-center/open-draft';
   const OPEN_DRAFT_ACK = 'capability-center/open-draft-ack';
   const DRAFT_ACK_TIMEOUT_MS = 16_000;
+  const DEV_DISTRIBUTION_META = 'capability-center-dev-distribution-url';
   type CapabilityType = keyof typeof TYPE_LABELS;
   type Action = 'install' | 'update' | 'diagnose' | 'uninstall';
 
@@ -83,6 +84,12 @@
 
   type Attribute = string | boolean | EventListener | null | undefined;
 
+  function devDistributionUrl() {
+    return document.querySelector<HTMLMetaElement>(
+      `meta[name="${DEV_DISTRIBUTION_META}"]`,
+    )?.content.trim() || '';
+  }
+
   function requiredElement<T extends HTMLElement>(id: string, elementType: new () => T): T {
     const element = document.getElementById(id);
     if (!(element instanceof elementType)) throw new Error(`页面缺少元素 #${id}`);
@@ -100,7 +107,7 @@
     query: '',
     loading: false,
     error: null as string | null,
-    serverUrl: localStorage.getItem(STORAGE_KEY) || '',
+    serverUrl: devDistributionUrl() || localStorage.getItem(STORAGE_KEY) || '',
     operations: new Map<string, Operation>(),
     detailItemId: null as string | null,
     draftAttempts: new Map<string, DraftAttempt>(),

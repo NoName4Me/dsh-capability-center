@@ -40,7 +40,10 @@ function httpGet(url, method = 'GET') {
 }
 
 test('offline archive is complete, contains current release metadata, and landing URL is substituted', async () => {
-  const archive = readZip(await readFile(join(root, 'capability-center-offline.zip')))
+  const archive = readZip(
+    await readFile(join(root, 'capability-center-offline.zip')),
+    { maxFileBytes: 32 * 1024 * 1024 },
+  )
   const names = [...archive.keys()].filter(name => !name.endsWith('/'))
   for (const required of [
     'capability-center/README.md',
@@ -52,6 +55,7 @@ test('offline archive is complete, contains current release metadata, and landin
     'capability-center/start-server.py',
     'capability-center/start-server.cmd',
     'capability-center/packages/capability-center-0.2.6.tgz',
+    'capability-center/packages/capability-center-drawio-0.1.7.tgz',
     'capability-center/packages/dsh-intranet-auto-continue-1.1.0.tgz',
     'capability-center/packages/office-enhancement-skill-1.0.0.zip',
     'capability-center/packages/pypdf-7.1.0-py3-none-any.whl',
@@ -64,7 +68,8 @@ test('offline archive is complete, contains current release metadata, and landin
   assert.equal(names.some(name => /report-format|dsh-local-sysinfo|tabulate/u.test(name)), false)
   const catalog = JSON.parse(archive.get('capability-center/catalog.json').toString('utf8'))
   assert.deepEqual(catalog.items.map(item => item.id).sort(), [
-    'dsh-intranet-auto-continue', 'office-enhancement', 'office-enhancement-skill', 'python-pypdf',
+    'capability-center-drawio', 'dsh-intranet-auto-continue',
+    'office-enhancement', 'office-enhancement-skill', 'python-pypdf',
   ])
   const landing = archive.get('capability-center/index.html').toString('utf8')
   assert.doesNotMatch(landing, /\{\{BOOTSTRAP_URL\}\}/u)
@@ -72,6 +77,7 @@ test('offline archive is complete, contains current release metadata, and landin
   const registry = JSON.parse(archive.get('capability-center/publication-registry.json').toString('utf8'))
   assert.equal(registry.entries['core@0.2.6'].kind, 'core')
   assert.equal(registry.entries['dsh-intranet-auto-continue@1.1.0'].type, 'plugin')
+  assert.equal(registry.entries['capability-center-drawio@0.1.7'].type, 'plugin')
   assert.equal(registry.entries['office-enhancement@1.0.0'].type, 'composite')
   assert.equal(registry.entries['python-pypdf@7.1.0'].type, 'python')
 })

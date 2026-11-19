@@ -1,5 +1,6 @@
 /dist/
 /.build/
+/.dev/
 /capability-center-offline.zip
 /capability-center-offline.zip.sha256
 /docs/verification/

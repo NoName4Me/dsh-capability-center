@@ -729,6 +729,60 @@ test('plugin restart-required is reprobed after service restart and stale activa
   }
 })
 
+test('plugin tool checks support the rc.3 batch executor contract', async () => {
+  const home = await tempRoot('capability-center-batch-tool-')
+  const pluginBytes = Buffer.from('batch-plugin-v1')
+  const item = {
+    id: 'batch-plugin',
+    type: 'plugin',
+    name: '批量工具插件',
+    version: '1.0.0',
+    description: 'fixture',
+    compatibility: { dsh: '0.2.1-rc.2', os: [process.platform], arch: [process.arch] },
+    artifact: {
+      path: 'packages/batch-plugin-1.0.0.tgz',
+      sha256: sha256(pluginBytes),
+      bytes: pluginBytes.length,
+    },
+    dependencies: [],
+    install: { packageName: 'batch-plugin' },
+    checks: [{ type: 'named-tool-readonly-call', tool: 'test_tool' }],
+    usage: { steps: ['安装。', '检查。'], inputs: '无。', output: '结果。', example: '检查。' },
+    trial: { prompt: '测试插件\n不要自动发送。' },
+  }
+  const server = await startFileServer(new Map([
+    ['/catalog.json', Buffer.from(JSON.stringify(catalog([item])))],
+    ['/packages/batch-plugin-1.0.0.tgz', pluginBytes],
+  ]))
+  const context = fakeContext({
+    batchTools: true,
+    bundleName: 'batch-plugin',
+    toolResult: successfulTool,
+  })
+  const service = serviceFor(home, context)
+  try {
+    await service.initialize()
+    const installed = await installFull(service, server.base, item.id)
+    assert.equal(installed.status, 'ready', installed.error)
+    const call = context.calls.find(value => value.kind === 'tool')
+    assert.deepEqual(call.request.calls.map(value => ({
+      type: value.type,
+      name: value.name,
+      arguments: JSON.parse(value.arguments),
+    })), [{
+      type: 'tool-call',
+      name: 'test_tool',
+      arguments: {},
+    }])
+    const diagnosed = await wait(service, service.startAction(server.base, item.id, 'diagnose'))
+    assert.equal(diagnosed.status, 'ready', diagnosed.error)
+  } finally {
+    await service.dispose()
+    await server.close()
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
 test('plugin checks reject missing results and failed updates restore the cached old TGZ', async () => {
   const home = await tempRoot('capability-center-plugin-rollback-')
   const oldBytes = Buffer.from('plugin-v1')
