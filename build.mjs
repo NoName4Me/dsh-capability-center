@@ -193,6 +193,63 @@ if (drawioAssets.count < 2_000) {
   throw new Error(`draw.io editor extraction is incomplete: ${drawioAssets.count} files`)
 }
 
+const genuiProvenanceFile = 'dsh-genui-0.16.0-provenance.json'
+const genuiProvenanceBytes = await readFile(join(root, 'vendor', genuiProvenanceFile))
+const genuiProvenance = JSON.parse(genuiProvenanceBytes)
+const genuiArchive = join(root, 'vendor', genuiProvenance.archive)
+if (await sha256(genuiArchive) !== genuiProvenance.archiveSha256) {
+  throw new Error('GenUI vendor archive hash mismatch')
+}
+const genuiFiles = tarFiles(await readFile(genuiArchive))
+const genuiUpstream = JSON.parse(genuiFiles.get('package/package.json'))
+if (genuiUpstream.name !== genuiProvenance.package || genuiUpstream.version !== genuiProvenance.version) {
+  throw new Error('GenUI vendor package identity mismatch')
+}
+const genuiBuild = join(work, 'genui-build')
+const genuiRuntimeFiles = [
+  'lib/index.js', 'lib/client.js',
+  'lib/assets/echarts-core.js', 'lib/assets/echarts-full.js', 'lib/assets/icons.js',
+  'lib/assets/maplibre.js', 'lib/assets/mermaid.js', 'lib/assets/standalone-runtime.js', 'lib/assets/three.js',
+  'assets/genui-icon.svg', 'assets/genui-logo.svg', 'cordis.patch.yml', 'SKILL.md',
+  'docs/copy-preview.md', 'docs/dsh-go.md', 'docs/gallery.md', 'docs/map.md',
+  'README.md', 'README.zh-CN.md', 'ICON-NAMES.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md',
+]
+for (const file of genuiRuntimeFiles) {
+  const bytes = genuiFiles.get(`package/${file}`)
+  if (bytes === undefined) throw new Error(`GenUI archive is missing ${file}`)
+  const target = join(genuiBuild, file)
+  await mkdir(dirname(target), { recursive: true })
+  await writeFile(target, bytes)
+}
+const genuiManifest = {
+  name: genuiUpstream.name,
+  version: genuiUpstream.version,
+  description: genuiUpstream.description,
+  license: genuiUpstream.license,
+  type: genuiUpstream.type,
+  main: genuiUpstream.main,
+  icon: genuiUpstream.icon,
+  exports: {
+    '.': './lib/index.js',
+    './client': './lib/client.js',
+    './package.json': './package.json',
+    './icon': './assets/genui-icon.svg',
+    './skill': './SKILL.md',
+    './assets/standalone': './lib/assets/standalone-runtime.js',
+    './assets/maplibre': './lib/assets/maplibre.js',
+  },
+  engines: { dsh: genuiUpstream.engines.dsh, node: genuiUpstream.engines.node },
+  dsh: genuiUpstream.dsh,
+  dshGo: genuiUpstream.dshGo,
+  files: [...genuiRuntimeFiles, genuiProvenanceFile],
+}
+await writeFile(join(genuiBuild, genuiProvenanceFile), genuiProvenanceBytes)
+await writeFile(join(genuiBuild, 'package.json'), JSON.stringify(genuiManifest, null, 2) + '\n')
+const [packedGenui] = JSON.parse(run('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', packages], {
+  cwd: genuiBuild,
+}))
+if (typeof packedGenui?.filename !== 'string') throw new Error('GenUI npm pack returned no filename')
+
 const officeSkillSource = join(root, 'src', 'capabilities', 'office-enhancement')
 const officeSkillBuild = join(work, 'office-skill-build')
 const officeSkillRoot = join(officeSkillBuild, 'office-enhancement-skill')
@@ -228,6 +285,7 @@ const artifacts = {
   bootstrap: await artifact(join(packages, packedBootstrap.filename)),
   autoContinue: await artifact(join(packages, packedAutoContinue.filename)),
   drawio: await artifact(join(packages, packedDrawio.filename)),
+  genui: await artifact(join(packages, packedGenui.filename)),
   officeSkill: await artifact(officeSkillZip),
   pypdf: await artifact(join(packages, 'pypdf-7.1.0-py3-none-any.whl')),
   core: await artifact(coreZip),
@@ -305,6 +363,35 @@ const catalog = {
       },
       trial: {
         prompt: 'draw.io 画布是宿主插件。安装并重启 DSH 后，在普通对话中让模型创建一张包含三个步骤的流程图，再通过消息卡片进入画布检查。不要建议公网 draw.io 或联网加载资源。',
+      },
+    },
+    {
+      id: 'dsh-genui',
+      type: 'plugin',
+      name: 'GenUI 交互式回复',
+      version: genuiManifest.version,
+      description: '在 DSH 回复中显示可交互的图表、表格和表单。此版本供内网试用，Win10 和 Win7 桌面端待实机验收。',
+      compatibility: {
+        os: ['win32', 'darwin'],
+        arch: ['x64', 'arm64'],
+        dsh: '0.2.1-rc.2 || 0.2.1-rc.5 || 0.2.1-rc.5-win7 || 0.2.2-rc.3',
+      },
+      artifact: artifacts.genui,
+      dependencies: [],
+      install: { packageName: genuiManifest.name },
+      checks: [{ type: 'plugin-bundle' }],
+      usage: {
+        steps: [
+          '从能力中心安装。若提示等待重启，请重启 DSH。使用网页版时重新加载页面。',
+          '在新对话中让模型用 GenUI 展示表格、图表或表单。',
+          '图表可用会话中的数据本地渲染。内网试用请使用本地媒体，地图默认没有街道底图。',
+        ],
+        inputs: '会话中的数据和需要用户选择或填写的项目。',
+        output: '回复内的交互组件。点击表单提交后，选择结果回到当前会话。',
+        example: '用虚构数据画一张三个月销量图，再给我一个选择月份的表单。',
+      },
+      trial: {
+        prompt: '请用 GenUI 在回复中展示一张三个月销量趋势图，使用虚构数据。再给我一个选择月份并提交的表单。请只使用本地组件，不加载任何外部资源。',
       },
     },
     {

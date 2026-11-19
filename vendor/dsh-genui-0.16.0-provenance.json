@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "package": "@changfenhuang/dsh-genui",
+  "version": "0.16.0",
+  "archive": "dsh-genui-0.16.0.tgz",
+  "archiveSha256": "faedeb35fda615f664d217c34d7d23ff076003294e16258352a5dc446d6a1be6",
+  "registry": "https://registry.npmjs.org/@changfenhuang%2Fdsh-genui/0.16.0",
+  "repository": "https://github.com/omdsh-dev/dsh-genui",
+  "license": "MIT",
+  "notes": "The offline repack ships the published runtime, skill, documentation and notices. It omits source-only exports, npm install dependencies and authoring metadata. Host-provided runtime modules are not vendored."
+}

@@ -2,7 +2,7 @@
 
 ## 目标与兼容边界
 
-当前能力中心核心版本是 `0.2.6`。这里的 `0.2.6` 是能力中心发布版本，不是 DSH 宿主版本。核心协议继续以 DSH `0.2.1-rc.2` 作为内部兼容标记，稳定引导的 `engines.dsh` 则声明为 `>=0.2.1-rc.2 <0.2.3`，覆盖文档中的 Win7、Win10 和已测试 macOS 预发布版本。稳定引导包名为 `capability-center`，可替换核心包名为 `capability-center-core`。产品不访问公共 npm、GitHub、pip 或模型；所有运行制品和依赖闭包由内网只读服务提供。
+当前能力中心核心版本是 `0.2.7`。这里的 `0.2.7` 是能力中心发布版本，不是 DSH 宿主版本。核心协议继续以 DSH `0.2.1-rc.2` 作为内部兼容标记，稳定引导的 `engines.dsh` 则声明为 `>=0.2.1-rc.2 <0.2.3`，覆盖文档中的 Win7、Win10 和已测试 macOS 预发布版本。稳定引导包名为 `capability-center`，可替换核心包名为 `capability-center-core`。产品不访问公共 npm、GitHub、pip 或模型；所有运行制品和依赖闭包由内网只读服务提供。
 
 设计参考了 [dsh-market](https://github.com/dsh-market/dsh-market/tree/88de9575946485c1dac5e1a5fbe57fa1f3c3988c)。对该仓库 `88de9575946485c1dac5e1a5fbe57fa1f3c3988c`（`dshmarket@1.73.20`，MIT）仅借鉴目录/本机分离、变更前日志、明确更新状态和失败码等架构模式，没有复制其大段实现或品牌资产。其官方桌面原位更新在宿主提供 package manager 时可用，但依赖公共包通道；本产品改用稳定引导与版本化核心，以适配无明显通用热替换保证的隔离内网。
 

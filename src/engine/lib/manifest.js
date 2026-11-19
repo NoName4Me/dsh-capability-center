@@ -6,6 +6,7 @@ export const MAX_ITEMS = 100
 export const MAX_ARTIFACT_BYTES = 32 * 1024 * 1024
 export const MAX_PROMPT_LENGTH = 4_000
 const ID = /^[a-z0-9][a-z0-9-]{0,63}$/u
+const PACKAGE_NAME = /^(?:@[a-z0-9][a-z0-9._-]{0,100}\/)?[a-z0-9][a-z0-9._-]{0,100}$/u
 const VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u
 const SHA256 = /^[a-f0-9]{64}$/u
 
@@ -123,7 +124,7 @@ function validateItem(item, index, base) {
   }
   if (item.type === 'plugin') {
     if (typeof item.install?.packageName !== 'string'
-      || !/^[a-z0-9][a-z0-9._-]{0,100}$/u.test(item.install.packageName)) {
+      || !PACKAGE_NAME.test(item.install.packageName)) {
       throw new CapabilityError('invalid-catalog', `插件 ${item.id} 缺少固定 packageName。`)
     }
   }

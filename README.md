@@ -1,8 +1,8 @@
-# DSH 能力中心 0.2.6
+# DSH 能力中心 0.2.7
 
 面向内网 DSH `0.2.1-rc.2` 至 `0.2.2-rc.2` 的只读能力分发中心。它管理技能、DSH 插件、纯 Python 库和能力包，不要求账号、凭据或模型调用。安装只使用目录声明的本地制品、固定版本和 SHA-256。
 
-当前能力中心版本为 `0.2.6`。核心协议继续使用 `0.2.1-rc.2` 作为兼容标记；实际宿主版本门禁由引导插件和各个插件包的 `engines.dsh` 执行，覆盖文档中的 Win7 `0.2.1-rc.5`、Win10 `0.2.1-rc.2` 以及已测试的 macOS `0.2.2-rc.1`。
+当前能力中心版本为 `0.2.7`。核心协议继续使用 `0.2.1-rc.2` 作为兼容标记；实际宿主版本门禁由引导插件和各个插件包的 `engines.dsh` 执行，覆盖文档中的 Win7 `0.2.1-rc.5`、Win10 `0.2.1-rc.2` 以及已测试的 macOS `0.2.2-rc.1`。
 
 [项目文档索引](docs/README.md)
 
@@ -45,13 +45,18 @@ macOS 桌面自带 DSH 没有在官方 Web profile 中启用 `load_workspace_dep
 
 `capability-center-offline.zip` 解压后得到完整分发目录 `capability-center/`：
 
-- `packages/capability-center-0.2.6.tgz`：稳定引导插件，也是唯一需要首次通过 DSH“插件 → 添加插件”手动安装的制品。
+- `packages/capability-center-0.2.7.tgz`：稳定引导插件，也是唯一需要首次通过 DSH“插件 → 添加插件”手动安装的制品。
 - `packages/dsh-intranet-auto-continue-1.1.0.tgz`：目录中的“自动续跑”宿主插件，由能力中心安装、更新和卸载。
-- `core/capability-center-core-0.2.6.zip`：当前可替换核心，包含可见插件目录、插件运行态检查、隐藏组件过滤、组件直接动作保护和固定 Office 自动检查。
+- `packages/changfenhuang-dsh-genui-0.16.0.tgz`：目录中的“GenUI 交互式回复”试用插件。构建读取固定的上游制品，保留预编译运行文件和许可声明，目标机安装从内网分发包取件。
+- `core/capability-center-core-0.2.7.zip`：当前可替换核心，包含可见插件目录、插件运行态检查、隐藏组件过滤、组件直接动作保护和固定 Office 自动检查。
 - `packages/office-enhancement-skill-1.0.0.zip`：Office 增强的隐藏技能，只包含固定的 `office_tools.py`、`office_smoke.py`、许可证和 provenance。
 - `packages/pypdf-7.1.0-py3-none-any.whl`：官方 PyPI 纯 Python wheel，作为 PDF 隐藏组件。
 - `catalog.json`、`core-release-index.json`、`artifact-manifest.json`、`publication-registry.json`：固定目录、核心索引、当前制品清单和发布校验记录。
 - `start-server.cmd`、`start-server.py`：只读分发服务。
+
+### GenUI 实机验收
+
+使用空的测试 profile 和 pnpm 缓存，阻断公网并保留内网分发服务与测试模型的连通性。分别在 Win10 x64 DSH `0.2.1-rc.2` 和 Win7 x64 DSH `0.2.1-rc.5-win7` 上从能力中心安装。按提示重启，确认目录显示已激活，再用“试用”草稿检查消息内的图表渲染、表单回传，以及同一轮先校验再生成回复是否报错。最后从能力中心卸载，确认重新启动后不再渲染 GenUI。记录实际宿主版本和各项结果。外链媒体依赖相应的网络，地图默认无街道底图。
 
 ## 首次安装
 
@@ -63,7 +68,7 @@ macOS 桌面自带 DSH 没有在官方 Web profile 中启用 `load_workspace_dep
    ```
 
 3. 在 DSH 中打开“插件 → 添加插件”，粘贴服务打印的 `Initial plugin URL`。
-4. 安装并启用 `capability-center-0.2.6.tgz`，根据 DSH 返回结果重启。这是本产品唯一需要手动交给 DSH 安装的插件。
+4. 安装并启用 `capability-center-0.2.7.tgz`，根据 DSH 返回结果重启。这是本产品唯一需要手动交给 DSH 安装的插件。
 5. 打开侧栏“能力中心”，填写分发基础地址，例如 `http://192.168.1.20:8765/`。
 
 分发服务没有登录、上传接口或写接口。请用防火墙限制到公司内网，并为分发机配置稳定地址。
@@ -74,11 +79,11 @@ macOS 桌面自带 DSH 没有在官方 Web profile 中启用 `load_workspace_dep
 
 1. 在“能力中心”填写分发地址，点“检查更新”。
 2. 点“下载更新”。在旧版页面中，此按钮叫“准备更新”。
-3. 重启 DSH。启动监督器会激活 `0.2.6`，候选启动失败时回退上一健康核心。
-4. 重新打开“能力中心”，确认核心为 `v0.2.6`，刷新目录。
+3. 重启 DSH。启动监督器会激活 `0.2.7`，候选启动失败时回退上一健康核心。
+4. 重新打开“能力中心”，确认核心为 `v0.2.7`，刷新目录。
 5. 打开“自动续跑”卡片。首次使用点击“安装”，已安装旧版则点击“更新”以使用续跑设置和记录。只有 DSH 显示“等待重启”时，才需为插件再重启一次。
 
-从更早版本升级时，顶部核心检查仍独立读取 `core-release-index.json`。即使旧核心因目录检查类型较新而无法显示能力列表，也先准备并重启到 `0.2.6`，再刷新目录。引导过旧且没有核心更新控件时，才需要用 `packages/capability-center-0.2.6.tgz` 人工替换一次。
+从更早版本升级时，顶部核心检查仍独立读取 `core-release-index.json`。即使旧核心因目录检查类型较新而无法显示能力列表，也先准备并重启到 `0.2.7`，再刷新目录。引导过旧且没有核心更新控件时，才需要用 `packages/capability-center-0.2.7.tgz` 人工替换一次。
 
 ### 管理已下架的示例能力
 
@@ -172,7 +177,7 @@ CAPABILITY_CENTER_BUILD_PYTHON=/path/to/python3 npm run build
 
 ```sh
 node tools/publish.mjs catalog --storage dist --catalog dist/catalog.json
-node tools/publish.mjs core --storage dist --archive dist/core/capability-center-core-0.2.6.zip
+node tools/publish.mjs core --storage dist --archive dist/core/capability-center-core-0.2.7.zip
 ```
 
 历史离线 ZIP 由 GitHub Releases 按版本保留。作者工具对同一个分发目录以 `publication-registry.json` 校验同版本制品一致性。修改已发布的能力制品时，请提升其版本。
