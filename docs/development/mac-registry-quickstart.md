@@ -62,7 +62,7 @@ npm run pack:target -- office-enhancement
 ```
 - OCR npm 版 0.2.0：模型随制品，Node 依赖 tesseract.js 7.0.0、image-size 2.0.2 及传递依赖必须先放入内网 npm。旧离线版使用不同版本 0.2.0-offline.1，防止同版本不同内容。
 - draw.io 0.2.0：同源前端资产仍随 Bundle 打包。
-- GenUI：保持上游固定版本的离线重打包，不属于本团队自主实现。导入时可通过管理 API overlay 指定原目录 ID dsh-genui。需核对 npm 名称、版本是否与已发布制品冲突。
+- GenUI：保持上游固定版本的离线重打包，不属于本团队自主实现。后台导入时可在可选 ID 字段填写原目录 ID dsh-genui，并填写展示名称。需核对 npm 名称、版本是否与已发布制品冲突。
 - Office 增强 1.1.0：上传 dist-independent/office-enhancement/skills/office-enhancement/1.1.0/ 下两个文件到 Raw 同名路径；将 packages/pypdf-7.1.0-py3-none-any.whl 上传 PyPI（例如用经过配置的 twine），后台导入 Raw Skill 声明 skills/office-enhancement/1.1.0/capability.json。终端按锁定版本/哈希从 PyPI 安装独立环境，继承 DSH 已有 Office 库。旧 composite 类型需先卸载再安装，不自动覆盖旧实现。实际 venv 和宿主 Python 兼容性尚待验证。
 - 核心：独立构建的 dist-independent/center/ 下 core/ 和 core-release-index.json 上传至 Raw 同名路径。先上传 ZIP，再发布索引。初次终端引导 TGZ 可经 DSH 原生插件入口安装。独立构建不会维护线上历史索引；正式升级时应先读取并保留既有 release index，使用 tools/publish.mjs core 维护发布历史。
 

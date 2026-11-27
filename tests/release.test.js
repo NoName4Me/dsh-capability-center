@@ -94,7 +94,7 @@ test('offline archive is complete, contains current release metadata, and landin
   ])
   const landing = archive.get('capability-center/index.html').toString('utf8')
   assert.doesNotMatch(landing, /\{\{BOOTSTRAP_URL\}\}/u)
-  assert.match(landing, /capability-center-0\.2\.12\.tgz/u)
+  assert.match(landing, /capability-center-0\.3\.0\.tgz/u)
   const manifest = JSON.parse(
     archive.get('capability-center/artifact-manifest.json').toString('utf8'),
   )
@@ -231,7 +231,7 @@ test('read-only distribution server serves built assets, HEAD, immutable paths, 
     const catalog = await httpGet(`${base}catalog.json`)
     assert.equal(catalog.status, 200)
     assert.match(catalog.headers['content-type'], /application\/json/u)
-    const initial = /Initial plugin URL: (http:\/\/127\.0\.0\.1:\d+\/packages\/capability-center-0\.2\.12\.tgz)/u
+    const initial = /Initial plugin URL: (http:\/\/127\.0\.0\.1:\d+\/packages\/capability-center-0\.3\.0\.tgz)/u
       .exec(stdout)
     assert.ok(initial, `server did not advertise the stable bootstrap:\n${stdout}`)
     assert.doesNotMatch(stdout, /Initial plugin URL: .*capability-center-drawio/u)

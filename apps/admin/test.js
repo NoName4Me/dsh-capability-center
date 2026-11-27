@@ -62,3 +62,28 @@ test('真实 npm pack 的制品读取、摘要和包元数据验证',async()=>{
  }finally{await fixture.close()}
  }finally{rmSync(root,{recursive:true,force:true})}
 })
+
+test('Raw Skill 导入包含受管资源、发布和撤回', {skip:!process.env.CAPABILITY_CENTER_TEST_PYTHON},async()=>{
+ const {readFileSync}=await import('node:fs')
+ const {resolveSkill}=await import('../../packages/publisher/index.js')
+ const {createSkillArchive,startFileServer,skillItem}=await import('../../tests/helpers.js')
+ const root=mkdtempSync(join(tmpdir(),'dsh-raw-skill-'))
+ const store=new Store(join(root,'admin'))
+ const fixture=await startFileServer()
+ try{
+ const archive=await createSkillArchive(join(root,'fixture.zip'),'raw-fixture','1.0.0')
+ const body=readFileSync(archive),asset=Buffer.from('test asset')
+ const item=skillItem('raw-fixture','1.0.0','skill.zip',body)
+ item.runtime={assets:[{name:'model',path:'model.bin',sha256:sha256(asset),bytes:asset.length,format:'file'}]}
+ fixture.routes.set('/raw/capability.json',item);fixture.routes.set('/raw/skill.zip',body);fixture.routes.set('/raw/model.bin',asset)
+ const draft=await resolveSkill({raw:fixture.base+'raw/',descriptorPath:'capability.json'})
+ store.stage(draft)
+ assert.equal(store.artifact(sha256(body),'zip'),undefined)
+ store.change(item.id,item.version,'publish')
+ assert.deepEqual(store.artifact(sha256(body),'zip'),body)
+ assert.deepEqual(store.artifact(sha256(asset),'bin'),asset)
+ assert.equal(store.catalog().items[0].runtime.assets[0].path,'packages/'+sha256(asset)+'.bin')
+ store.change(item.id,item.version,'revoke')
+ assert.equal(store.artifact(sha256(asset),'bin'),undefined)
+ }finally{store.close();await fixture.close();rmSync(root,{recursive:true,force:true})}
+})
