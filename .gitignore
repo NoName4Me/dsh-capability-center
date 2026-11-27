@@ -16,3 +16,7 @@ Desktop.ini
 .env
 .env.*
 !.env.example
+
+# Private registry development
+.admin-data/
+.env.local

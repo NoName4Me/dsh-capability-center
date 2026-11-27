@@ -1,0 +1,6 @@
+packages:
+  - apps/*
+  - packages/*
+  - src/bootstrap
+  - src/engine
+  - src/capabilities/*
