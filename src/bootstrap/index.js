@@ -10,6 +10,7 @@ const PACKAGE_ROOT = dirname(fileURLToPath(import.meta.url))
 const FILES = new Map([
   ['/', ['page/fallback.html', 'text/html; charset=utf-8']],
   ['/favicon.svg', ['icon.svg', 'image/svg+xml']],
+  ['/icon.svg', ['icon.svg', 'image/svg+xml']],
 ])
 
 function sendMethod(res, allow) {

@@ -6,6 +6,8 @@ export async function apply(ctx, config) {
   const service = new CoreService(ctx, {
     ...config.runtime,
     archive: undefined,
+    coreCheck: config.runtime.coreCheck,
+    coreStatus: config.runtime.coreStatus,
   })
   await service.initialize()
   config.runtime.setEngine(service)

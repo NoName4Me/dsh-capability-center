@@ -10,6 +10,7 @@ test('client bridge creates a fresh DSH chat with a prefilled prompt and never s
   assert.doesNotMatch(code, /\.submit\s*\(/u)
   let registration
   const listeners = new Map()
+  const documentListeners = new Map()
   const cleanups = []
   const source = {
     posted: [],
@@ -77,7 +78,11 @@ test('client bridge creates a fresh DSH chat with a prefilled prompt and never s
     },
   }
   const browserWindow = {
-    location: { origin: 'https://dsh.local' },
+    location: { origin: 'https://dsh.local', reload() { this.reloads = (this.reloads ?? 0) + 1 } },
+    localStorage: {
+      getItem() { return null },
+    },
+    sessionStorage: new Map(),
     addEventListener(type, listener) {
       listeners.set(type, listener)
     },
@@ -85,10 +90,23 @@ test('client bridge creates a fresh DSH chat with a prefilled prompt and never s
       listeners.delete(type)
     },
   }
+  browserWindow.sessionStorage = {
+    getItem(key) { return this.values?.get(key) ?? null },
+    setItem(key, value) { this.values ??= new Map(); this.values.set(key, String(value)) },
+    removeItem(key) { this.values?.delete(key) },
+  }
+  const requests = []
   const sandbox = {
     AbortController,
     clearTimeout,
     setTimeout,
+    setInterval,
+    clearInterval,
+    document: {
+      visibilityState: 'visible',
+      addEventListener(type, listener) { documentListeners.set(type, listener) },
+      removeEventListener(type) { documentListeners.delete(type) },
+    },
     window: {
       __ModuleLoader__: {
         load(value) {
@@ -96,6 +114,13 @@ test('client bridge creates a fresh DSH chat with a prefilled prompt and never s
         },
       },
       ...browserWindow,
+      fetch: async url => {
+        requests.push(String(url))
+        return {
+          ok: true,
+          async json() { return { attention: true } },
+        }
+      },
     },
   }
   vm.runInNewContext(code, sandbox)
@@ -104,6 +129,10 @@ test('client bridge creates a fresh DSH chat with a prefilled prompt and never s
   const react = {
     createElement(tag, props, ...children) {
       return { tag, props, children }
+    },
+    useEffect() {},
+    useSyncExternalStore(_subscribe, getSnapshot) {
+      return getSnapshot()
     },
   }
   const loaded = registration.factory(name => {
@@ -138,8 +167,10 @@ test('client bridge creates a fresh DSH chat with a prefilled prompt and never s
   loaded.apply(ctx)
   const main = registered.find(value => value.options.name === 'main')
   const sidebar = registered.find(value => value.options.name === 'sidebar.panellist')
+  const overlay = registered.find(value => value.options.name === 'shell.overlay')
   assert.equal(main.options.key, 'capability-center')
   assert.equal(sidebar.options.id, 'capability-center')
+  assert.equal(overlay.options.id, 'capability-center.refresh-toast')
   const rendered = main.component()
   assert.equal(rendered.children[0].props.src, '/capability-center/')
   rendered.children[0].props.ref({ contentWindow: source })
@@ -168,6 +199,13 @@ test('client bridge creates a fresh DSH chat with a prefilled prompt and never s
   assert.equal(retained[0].released, true)
   assert.equal(source.posted.at(-1).message.ok, true)
 
+  await new Promise(resolveWait => setTimeout(resolveWait, 30))
+  const icon = sidebar.component({ size: 16, active: false })
+  assert.equal(icon.children[0].props.style.width, 16)
+  assert.match(icon.children[0].props.style.mask, /\/capability-center\/icon\.svg/u)
+  assert.equal(icon.children.length, 2)
+  assert.ok(requests.some(url => url.includes('/api/updates')))
+
   const wrong = await listeners.get('message')({
     origin: 'https://dsh.local',
     source,
@@ -178,31 +216,80 @@ test('client bridge creates a fresh DSH chat with a prefilled prompt and never s
   assert.equal(created.length, 1)
   assert.equal(drafts.length, 1)
 
+  const reloadsBefore = browserWindow.location.reloads ?? 0
+  await listeners.get('message')({
+    origin: 'https://dsh.local',
+    source,
+    data: {
+      type: 'capability-center/reload-dsh',
+      target: 'plugin',
+      itemId: 'auto-continue',
+      version: '1.1.0',
+      action: 'update',
+      origin: 'https://dsh.local',
+      extra: 'not allowed',
+    },
+  })
+  await new Promise(resolveWait => setTimeout(resolveWait, 60))
+  assert.equal(browserWindow.location.reloads ?? 0, reloadsBefore)
+
+  await listeners.get('message')({
+    origin: 'https://dsh.local',
+    source,
+    data: {
+      type: 'capability-center/reload-dsh',
+      target: 'plugin',
+      itemId: 'auto-continue',
+      version: '1.1.0',
+      action: 'install',
+      origin: 'https://dsh.local',
+    },
+  })
+  await new Promise(resolveWait => setTimeout(resolveWait, 60))
+  assert.equal(browserWindow.location.reloads, 1)
+  assert.equal(
+    JSON.parse(browserWindow.sessionStorage.getItem('capability-center.refresh-pending')).action,
+    'install',
+  )
+
   for (const cleanup of cleanups.reverse()) await cleanup?.()
 })
 
 test('UI source exposes category filters, card details, update results and offline management', async () => {
-  const [html, app, css] = await Promise.all([
+  const [html, app, css, client] = await Promise.all([
     readFile(join(root, 'src', 'engine', 'page', 'index.html'), 'utf8'),
     readFile(join(root, 'src', 'engine', 'page', 'app.ts'), 'utf8'),
     readFile(join(root, 'src', 'engine', 'page', 'styles.css'), 'utf8'),
+    readFile(join(root, 'src', 'bootstrap', 'client.js'), 'utf8'),
   ])
-  for (const label of ['全部', '技能', '插件', 'Python 库', '能力包', '已安装']) {
+  for (const label of ['全部', '技能', '插件', 'MCP', '能力包', '已安装']) {
     assert.match(html, new RegExp(`>${label}<`, 'u'))
   }
+  assert.doesNotMatch(html, />Python 库</u)
   assert.match(app, /检查与修复/u)
   assert.match(app, /卸载/u)
   assert.match(html, /关闭详情/u)
-  assert.match(app, /重启 DSH 后更新到 v\$\{pending\.version\}/u)
+  assert.match(app, /核心 v\$\{pending\.version\} 已暂存/u)
+  assert.match(app, /刷新生效/u)
+  assert.match(app, /\/api\/core\/activate/u)
+  assert.match(app, /state\.refreshBridge\.coreActivation/u)
+  assert.match(app, /state\.refreshBridge\.reload/u)
+  assert.match(app, /已生效，请手动刷新页面/u)
+  assert.match(app, /\/api\/refresh-state/u)
+  assert.match(app, /\/api\/config/u)
+  assert.match(app, /category !== 'mcp'/u)
   assert.match(app, /已是最新版本/u)
   assert.match(app, /分发服务器没有兼容版本/u)
   assert.match(html, /<dialog[^>]+aria-labelledby="capability-dialog-title"/u)
   assert.match(html, /<form method="dialog">/u)
+  assert.match(html, /href="\/capability-center\/styles\.css"/u)
+  assert.match(html, /src="\/capability-center\/app\.js"/u)
   assert.match(app, /detailDialog\.showModal\(\)/u)
   assert.match(app, /renderActions\(item, status, 'card'\)/u)
   assert.match(app, /capability-card-body/u)
   assert.match(app, /trialAvailable !== false/u)
   assert.match(app, /label: '已安装'/u)
+  assert.match(app, /if \(!installed \|\| status\.label === '可更新'\) \{\s*label\.textContent = status\.label;\s*return label;/u)
   assert.match(app, /state\.localOnly \? '' : state\.serverUrl/u)
   assert.match(app, /devDistributionUrl\(\) \|\| localStorage\.getItem\(STORAGE_KEY\)/u)
   assert.match(app, /capability-center-dev-distribution-url/u)
@@ -217,11 +304,38 @@ test('UI source exposes category filters, card details, update results and offli
   assert.match(app, /getComputedStyle\(tokenSource\)/u)
   assert.match(app, /data-ds-theme-source/u)
   assert.match(app, /if \(window\.parent !== window\) \{\s*try \{\s*const observer = new MutationObserver/u)
-  assert.match(html, /安装与检查在本机完成，本机系统信息不会上传到分发服务器/u)
+  assert.doesNotMatch(html, /安装与检查在本机完成/u)
+  assert.doesNotMatch(html, /隐私/u)
   assert.doesNotMatch(app, /['"](验证|自检)['"]\s*,?\s*type:\s*['"]button/u)
-  assert.match(css, /--blue:\s*#4d6bfe/u)
+  assert.match(html, /feedback-dialog/u)
+  assert.match(html, /反馈问题或需求/u)
+  assert.match(html, /并附能说明问题的截图/u)
+  assert.doesNotMatch(html, /<textarea/u)
+  assert.doesNotMatch(html, /type="file"/u)
+  assert.doesNotMatch(html, /feedback-cancel/u)
+  assert.match(app, /\.join\('\\r\\n'\)/u)
+  assert.match(app, /mailto:/u)
+  assert.doesNotMatch(app, /window\.open/u)
+  assert.doesNotMatch(app, /_blank|_top/u)
+  assert.match(client, /shell\.overlay/u)
+  assert.match(client, /RELOAD_MESSAGE_KEYS/u)
+  assert.match(client, /value\.action === 'activate'/u)
+  assert.match(client, /已安装并生效/u)
+  assert.match(client, /已更新并生效/u)
+  assert.match(client, /UPDATE_CHECK_INTERVAL_MS/u)
+  assert.match(app, /PLUGIN_REFRESH_KEY/u)
+  assert.match(app, /hostReloadedSince/u)
+  assert.match(app, /state\.refreshBridge\.reload\s*\n?\s*&& operation\.status/u)
+  assert.match(app, /JSON\.stringify\(\{ version: pending\.version \}\)/u)
+  assert.match(client, /refresh-state\?itemId=/u)
+  assert.match(client, /background:\s*'#d92d20'/u)
+  assert.match(css, /--blue:\s*#4059dc/u)
   assert.match(css, /--page:\s*#fff/u)
   assert.match(css, /:root\[data-theme="dark"\][\s\S]*?--page:\s*#151517/u)
+  assert.match(css, /html, body \{ height: 100%; \}/u)
+  assert.match(css, /grid-template-rows: minmax\(0, 1fr\) auto/u)
+  assert.match(css, /\.center-shell\s*\{[\s\S]*?overflow: auto;/u)
+  assert.doesNotMatch(css, /\.capability-item:hover/u)
   assert.match(css, /\.filters\s*\{[^}]*flex-wrap:\s*wrap/u)
   assert.doesNotMatch(css, /\.filters\s*\{[^}]*overflow-x/u)
   assert.match(css, /prefers-reduced-motion/u)

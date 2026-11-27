@@ -25,7 +25,7 @@ ol{padding-left:22px}.url{padding:12px;border:1px solid #35425a;border-radius:8p
 <h2>从旧管理器迁移</h2>
 <p class="note">若曾安装 capability-center-demo，请先在 DSH 插件页停用并移除旧管理器一次。报告格式、本机系统信息和 Tabulate 会从本机回执与 profile 检测并在新账本中显示；不要删除这三项能力或 DSH 配置。</p>
 <h2>后续更新</h2>
-<p>频繁更新的核心通过页面顶部“检查更新 / 准备更新”下载。准备完成后当前进程继续运行；下次启动 DSH 时切换，启动失败自动回退上一健康核心。能力中心稳定引导插件只在协议升级时需要人工处理。</p>
+<p>频繁更新的核心通过页面顶部“检查更新 / 下载更新”暂存。新版引导会串行停止旧核心、验证候选并回退失败版本，成功后刷新 DSH。旧引导仍可在下次启动 DSH 时兼容激活。稳定引导插件只在升级引导能力或协议时从 DSH 插件页人工替换。</p>
 <h2>目录</h2>
 <p><a id="base-url" href="/">/</a> · <a href="/catalog.json">catalog.json</a> · <a href="/core-release-index.json">core-release-index.json</a> · <a href="/publication-registry.json">publication-registry.json</a></p>
 </main>

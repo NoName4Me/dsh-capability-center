@@ -89,6 +89,7 @@ function validateItem(item, index, base) {
     || !Array.isArray(item.checks) || item.checks.length === 0 || item.checks.length > 8
     || !item.checks.every(validCheck)
     || (item.hidden !== undefined && typeof item.hidden !== 'boolean')
+    || (item.category !== undefined && item.category !== 'mcp')
     || (item.dependencies !== undefined && (!Array.isArray(item.dependencies) || item.dependencies.length > 32
       || !item.dependencies.every(validDependency)))
     || typeof item.trial !== 'object' || item.trial === null || Array.isArray(item.trial)
@@ -127,6 +128,12 @@ function validateItem(item, index, base) {
       || !PACKAGE_NAME.test(item.install.packageName)) {
       throw new CapabilityError('invalid-catalog', `插件 ${item.id} 缺少固定 packageName。`)
     }
+  }
+  if (item.category === 'mcp' && item.type !== 'plugin') {
+    throw new CapabilityError(
+      'invalid-catalog',
+      `MCP 分类只能标注随 DSH 插件注册 MCP 的插件：${item.id}。`,
+    )
   }
   if (item.type === 'python') {
     if (typeof item.install?.distribution !== 'string'

@@ -28,6 +28,7 @@ const INDEX_MAX_BYTES = 1024 * 1024
 const CORE_ARCHIVE_MAX_BYTES = 32 * 1024 * 1024
 const DEV_DISTRIBUTION_META_ENV = 'CAPABILITY_CENTER_DEV_DISTRIBUTION_URL'
 const DEV_SEED_ENV = 'CAPABILITY_CENTER_DEV_SEED'
+const FEEDBACK_EMAIL_ENV = 'CAPABILITY_CENTER_FEEDBACK_EMAIL'
 
 function dshHome() {
   const configured = String(process.env.DSH_HOME ?? '').trim()
@@ -192,6 +193,7 @@ export class EngineSupervisor {
     now = () => new Date().toISOString(),
     devSeed = process.env[DEV_SEED_ENV] === '1',
     devDistributionUrl = normalizeDevDistributionUrl(process.env[DEV_DISTRIBUTION_META_ENV]),
+    feedbackEmail = process.env[FEEDBACK_EMAIL_ENV],
   }) {
     this.ctx = ctx
     this.packageRoot = packageRoot
@@ -205,7 +207,12 @@ export class EngineSupervisor {
     this.engine = undefined
     this.fiber = undefined
     this.disposed = false
-    this.stageQueue = Promise.resolve()
+    this.lifecycleQueue = Promise.resolve()
+    this.inFlightHandles = new Set()
+    this.seed = undefined
+    this.feedbackEmail = typeof feedbackEmail === 'string' && feedbackEmail.trim() !== ''
+      ? feedbackEmail.trim()
+      : undefined
     this.ready = this.start()
   }
 
@@ -247,7 +254,21 @@ export class EngineSupervisor {
   async start() {
     try {
       if (this.disposed) return { ready: false, error: 'supervisor-disposed' }
+      if (this.feedbackEmail === undefined) {
+        try {
+          const packaged = JSON.parse(await readFile(
+            join(this.packageRoot, 'feedback-config.json'),
+            'utf8',
+          ))
+          if (typeof packaged.feedbackEmail === 'string' && packaged.feedbackEmail.trim() !== '') {
+            this.feedbackEmail = packaged.feedbackEmail.trim()
+          }
+        } catch {
+          // Feedback email configuration is optional.
+        }
+      }
       const seed = await this.ensureSeed()
+      this.seed = seed
       let state = await this.state()
       const seedSource = this.devSeed ? 'dev-seed' : 'seed'
       if (state.current === null
@@ -273,6 +294,19 @@ export class EngineSupervisor {
           },
         })
       }
+      const currentVersion = state.current?.version ?? '0.0.0'
+      const pendingVersion = state.pending?.version ?? '0.0.0'
+      if (compareVersions(seed.version, currentVersion) > 0
+        && state.lastFailure?.version !== seed.version
+        && (state.pending === null || compareVersions(seed.version, pendingVersion) > 0)) {
+        state = await this.writeState({
+          ...state,
+          pending: {
+            version: seed.version,
+            source: seedSource,
+          },
+        })
+      }
       if (state.pending !== null) {
         const candidate = state.pending
         state = await this.writeState({
@@ -285,7 +319,10 @@ export class EngineSupervisor {
             startedAt: this.now(),
           },
         })
-        const activated = await this.tryActivate(candidate)
+        const activated = await this.tryActivate(
+          candidate,
+          this.activationRoot(candidate, seed),
+        )
         if (activated) {
           state = await this.writeState({
             ...state,
@@ -355,18 +392,33 @@ export class EngineSupervisor {
 
   async tryActivate(entry, sourceRoot) {
     if (this.disposed) return false
-    if (entry === null || typeof entry?.version !== 'string') return false
-    if (this.fiber !== undefined) {
-      this.engine = undefined
-      const oldFiber = this.fiber
-      this.fiber = undefined
-      await oldFiber.dispose?.()
+    await this.disposeCurrentEngine()
+    return (await this.launchCore(entry, sourceRoot)).ok
+  }
+
+  async launchCore(entry, sourceRoot) {
+    if (this.disposed) return { ok: false, error: '能力中心监督器正在关闭。' }
+    if (entry === null || typeof entry?.version !== 'string') {
+      return { ok: false, error: '核心版本记录无效。' }
     }
     const releaseRoot = sourceRoot ?? join(this.releasesRoot, entry.version)
     const modulePath = join(releaseRoot, 'engine', 'index.js')
+    let fiber
+    let disposed = false
+    const disposeCandidate = async () => {
+      if (disposed || fiber === undefined) return
+      disposed = true
+      try {
+        await fiber.dispose?.()
+      } catch {
+        // A failed candidate must not mask the original startup error.
+      }
+    }
     try {
       const manifest = JSON.parse(await readFile(join(releaseRoot, 'manifest.json'), 'utf8'))
-      if (!validateCoreManifest(manifest)) return false
+      if (!validateCoreManifest(manifest) || manifest.version !== entry.version) {
+        return { ok: false, error: `核心 ${entry.version} 的清单无效。` }
+      }
       const moduleUrl = pathToFileURL(modulePath)
       moduleUrl.searchParams.set('v', `${manifest.version}-${randomUUID()}`)
       const module = await import(moduleUrl.href)
@@ -380,25 +432,157 @@ export class EngineSupervisor {
         http: this.http,
         devDistributionUrl: this.devDistributionUrl,
         setEngine: engine => { candidateEngine = engine },
+        coreCheck: serverUrl => this.check(serverUrl),
+        coreStatus: () => this.status(),
+        feedbackEmail: this.feedbackEmail,
+        refreshBridge: {
+          reload: true,
+          overlay: true,
+          coreActivation: true,
+          nativeRestart: this.desktopRestartActions() !== undefined,
+        },
       }
-      const fiber = this.ctx.plugin(module, { runtime })
+      fiber = this.ctx.plugin(module, { runtime })
       try {
         await fiber.await()
       } catch (error) {
-        await fiber.dispose?.()
         throw error
       }
       if (candidateEngine === undefined) {
-        await fiber.dispose?.()
         throw new Error('核心没有完成服务注册。')
+      }
+      if (typeof candidateEngine.verify === 'function') {
+        const verified = await candidateEngine.verify()
+        if (verified?.ready !== true || verified?.version !== manifest.version) {
+          throw new Error('核心健康检查没有确认当前版本已就绪。')
+        }
       }
       this.fiber = fiber
       this.engine = candidateEngine
-      return true
+      return { ok: true }
     } catch (error) {
-      this.engine = undefined
+      if (this.engine !== undefined) this.engine = undefined
+      if (this.fiber !== undefined) this.fiber = undefined
+      await disposeCandidate()
       if (this.ctx.logger?.warn) this.ctx.logger.warn(`能力中心核心 ${entry.version} 启动失败`, error)
-      return false
+      return { ok: false, error: messageOf(error) }
+    }
+  }
+
+  async disposeCurrentEngine() {
+    const engine = this.engine
+    const fiber = this.fiber
+    this.engine = undefined
+    this.fiber = undefined
+    engine?.stopAcceptingWork?.()
+    try {
+      await engine?.drain?.()
+    } catch {
+      // Disposal continues so the old fiber cannot retain registered services.
+    }
+    try {
+      await fiber?.dispose?.()
+    } catch {
+      // The caller reports recovery from the replacement core, not cleanup noise.
+    }
+  }
+
+  async drainInFlightHandles() {
+    while (this.inFlightHandles.size > 0) {
+      await Promise.allSettled([...this.inFlightHandles])
+    }
+  }
+
+  enqueueLifecycle(callback) {
+    const run = this.lifecycleQueue.then(callback)
+    this.lifecycleQueue = run.catch(() => undefined)
+    return run
+  }
+
+  async activatePending(expectedVersion) {
+    const before = await this.state()
+    const candidate = before.pending
+    if (candidate === null) {
+      throw Object.assign(new Error('当前没有已暂存的核心。'), {
+        code: 'no-pending-core',
+        status: 409,
+      })
+    }
+    if (expectedVersion !== undefined && candidate.version !== expectedVersion) {
+      throw Object.assign(new Error('已暂存核心已被另一个窗口更改，请刷新当前状态后重试。'), {
+        code: 'pending-core-changed',
+        status: 409,
+        expectedVersion,
+        pendingVersion: candidate.version,
+      })
+    }
+    const previous = before.current
+    const manifest = await this.validateCandidateDirectory(candidate.version)
+    if (previous === null) {
+      throw Object.assign(new Error('没有可回退的当前核心，拒绝原位切换。'), {
+        code: 'no-previous-core',
+        status: 409,
+      })
+    }
+    const bootAttemptState = await this.writeState({
+      ...before,
+      bootAttempt: {
+        version: candidate.version,
+        source: candidate.source ?? null,
+        sha256: candidate.sha256 ?? null,
+        fromVersion: previous.version,
+        startedAt: this.now(),
+        mode: 'hot-activation',
+      },
+    })
+    try {
+      this.engine?.stopAcceptingWork?.()
+      await this.engine?.drain?.()
+      await this.drainInFlightHandles()
+      await this.disposeCurrentEngine()
+      const launched = await this.launchCore(candidate)
+      if (!launched.ok) {
+        throw new Error(launched.error || '候选核心启动失败。')
+      }
+      const next = await this.writeState({
+        ...bootAttemptState,
+        current: candidate,
+        previous,
+        pending: null,
+        bootAttempt: null,
+        lastFailure: null,
+      })
+      return {
+        activated: true,
+        activeVersion: manifest.version,
+        version: manifest.version,
+        previousVersion: previous.version,
+        state: next,
+      }
+    } catch (error) {
+      await this.disposeCurrentEngine()
+      const rollback = await this.launchCore(previous, this.activationRoot(previous, this.seed))
+      const current = await this.state().catch(() => before)
+      if (rollback.ok) {
+        await removeQuietly(join(this.releasesRoot, candidate.version))
+      }
+      await this.writeState({
+        ...current,
+        pending: rollback.ok ? null : current.pending ?? candidate,
+        bootAttempt: rollback.ok ? null : current.bootAttempt,
+        lastFailure: {
+          version: candidate.version,
+          message: `运行时切换失败：${messageOf(error)}`,
+          at: this.now(),
+        },
+      }).catch(() => undefined)
+      const suffix = rollback.ok ? '已回退当前健康核心。' : '当前健康核心也无法恢复，请重启 DSH。'
+      throw Object.assign(new Error(`${messageOf(error)} ${suffix}`), {
+        code: 'core-activation-failed',
+        status: 500,
+        rolledBack: rollback.ok,
+        attemptedVersion: candidate.version,
+      })
     }
   }
 
@@ -418,12 +602,10 @@ export class EngineSupervisor {
   }
 
   async stage(serverUrl) {
-    const run = this.stageQueue.then(async () => {
+    return await this.enqueueLifecycle(async () => {
       if (this.disposed) throw Object.assign(new Error('能力中心正在关闭。'), { code: 'disposed' })
       return await this.stageUnserialized(serverUrl)
     })
-    this.stageQueue = run.catch(() => undefined)
-    return await run
   }
 
   async stageUnserialized(serverUrl) {
@@ -517,7 +699,8 @@ export class EngineSupervisor {
         staged: true,
         version: manifest.version,
         currentVersion,
-        restartRequired: true,
+        refreshRequired: true,
+        restartRequired: false,
         pendingVersion: next.pending.version,
       }
     } catch (error) {
@@ -562,10 +745,89 @@ export class EngineSupervisor {
     }
   }
 
+  async dispatchEngine(req, res, route, url) {
+    const engine = this.engine
+    if (engine === undefined) return false
+    const task = Promise.resolve().then(() => engine.handle(req, res, route, url))
+    this.inFlightHandles.add(task)
+    try {
+      return await task
+    } finally {
+      this.inFlightHandles.delete(task)
+    }
+  }
+
   async handle(req, res, route, url) {
     await this.ready
+    if (route === '/api/host/restart') {
+      if (req.method !== 'POST') {
+        this.sendJson(res, 405, { message: '重启只接受 POST。' })
+        return true
+      }
+      const address = req.socket?.remoteAddress
+      if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(address)) {
+        this.sendJson(res, 403, { message: '请在 DSH 桌面端请求重启。' })
+        return true
+      }
+      const actions = this.desktopRestartActions()
+      if (actions === undefined) {
+        this.sendJson(res, 501, { message: '当前宿主不提供一键重启，请退出并重新打开 DSH。' })
+        return true
+      }
+      const body = await this.bodyJson(req)
+      if (body.confirm !== true) {
+        this.sendJson(res, 400, { message: '请先确认重启。' })
+        return true
+      }
+      await this.lifecycleQueue
+      if (this.engine?.hasPendingActions?.()) {
+        this.sendJson(res, 409, { message: '请等能力安装或更新结束后再重启。' })
+        return true
+      }
+      if (!this.restartRequested) {
+        this.restartRequested = true
+        res.once('finish', () => {
+          setTimeout(async () => {
+            try {
+              await actions.requestRestart()
+            } catch (error) {
+              this.ctx.logger?.warn?.('能力中心请求 DSH 重启失败', error)
+            } finally {
+              this.restartRequested = false
+            }
+          }, 150).unref()
+        })
+      }
+      this.sendJson(res, 202, { requested: true })
+      return true
+    }
+    if (route === '/api/core/activate') {
+      if (req.method !== 'POST') {
+        this.sendJson(res, 405, { code: 'method-not-allowed', message: '核心切换只接受 POST。' })
+        return true
+      }
+      const body = await this.bodyJson(req)
+      if (typeof body.version !== 'string'
+        || parseVersion(body.version) === null) {
+        this.sendJson(res, 400, {
+          code: 'version-required',
+          message: '核心切换必须确认当前页面看到的待激活版本。',
+        })
+        return true
+      }
+      const result = await this.enqueueLifecycle(() => this.activatePending(body.version))
+      this.sendJson(res, 200, {
+        activated: result.activated,
+        activeVersion: result.activeVersion,
+        version: result.version,
+        previousVersion: result.previousVersion,
+        rolledBack: false,
+      })
+      return true
+    }
+    await this.lifecycleQueue
     if (route === '/api/core/status') {
-      if (this.engine !== undefined && await this.engine.handle(req, res, route, url)) return true
+      if (await this.dispatchEngine(req, res, route, url)) return true
       await this.sendCoreStatus(res)
       return true
     }
@@ -581,12 +843,17 @@ export class EngineSupervisor {
       this.sendJson(res, 200, result)
       return true
     }
-    if (this.engine !== undefined) return await this.engine.handle(req, res, route, url)
+    if (await this.dispatchEngine(req, res, route, url)) return true
     if (route.startsWith('/api/')) {
       this.sendJson(res, 503, { code: 'core-unavailable', message: '核心引擎不可用，请在 DSH 重启后检查。' })
       return true
     }
     return false
+  }
+
+  desktopRestartActions() {
+    const actions = this.ctx.get?.('desktopActions')
+    return typeof actions?.requestRestart === 'function' ? actions : undefined
   }
 
   async sendCoreStatus(res) {
@@ -626,10 +893,8 @@ export class EngineSupervisor {
   async dispose() {
     this.disposed = true
     await this.ready.catch(() => undefined)
-    await this.stageQueue.catch(() => undefined)
-    this.engine = undefined
-    const fiber = this.fiber
-    this.fiber = undefined
-    await fiber?.dispose?.()
+    await this.lifecycleQueue.catch(() => undefined)
+    await this.drainInFlightHandles()
+    await this.disposeCurrentEngine()
   }
 }

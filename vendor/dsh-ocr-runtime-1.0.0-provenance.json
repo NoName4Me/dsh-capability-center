@@ -1,0 +1,9 @@
+{
+  "sha256": "d87e00ec4d4ee81c95c42aad19ca15c533df08957d21402e51e88eaf93540f3f",
+  "dependencies": { "tesseract.js": "7.0.0", "image-size": "2.0.2" },
+  "models": {
+    "source": "https://github.com/tesseract-ocr/tessdata_fast/tree/4.1.0",
+    "chi_sim.traineddata": "a5fcb6f0db1e1d6d8522f39db4e848f05984669172e584e8d76b6b3141e1f730",
+    "eng.traineddata": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2"
+  }
+}

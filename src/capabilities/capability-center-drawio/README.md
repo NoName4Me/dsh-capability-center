@@ -38,7 +38,7 @@ standard draw.io colors or otherwise needs the style preserved unchanged.
 
 ## Tools
 
-- `drawio_create` creates a board from nodes and optional edges.
+- `drawio_create` creates a board from nodes and optional edges when the current user message explicitly asks for a drawing. For example, “请画一张 OAuth 授权流程图” creates a board. “OAuth 授权是什么流程” can be answered in text.
 - `drawio_get_selection` reads the activating session's current board,
   revision, page, selected cell IDs, labels, and edge endpoints.
 - `drawio_get_diagram` reads the complete normalized draw.io XML.

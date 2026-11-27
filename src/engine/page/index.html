@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="dark light">
   <title>能力中心</title>
+  <link rel="icon" href="/capability-center/icon.svg" type="image/svg+xml">
   <script>
     (() => {
       let scheme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
@@ -24,8 +25,10 @@
   <main class="center-shell">
     <header class="page-head">
       <div class="heading-block">
-        <h1>能力中心</h1>
-        <p class="page-intro">在内网安装和管理技能、插件、Python 库与能力包。</p>
+        <div class="page-title">
+          <span class="page-mark fish-tail-mark" aria-hidden="true"></span>
+          <h1>能力中心</h1>
+        </div>
       </div>
       <section class="core-panel" id="core-panel" aria-label="核心版本">
         <div class="core-version">
@@ -39,8 +42,9 @@
 
     <section class="notice" id="preview-notice" hidden>
       <strong>本地预览</strong>
-      <span>可浏览、搜索和筛选当前构建的目录。安装、试用和核心更新请在 DSH 中操作。</span>
+      <span>请在 DSH 中安装或使用能力、更新能力中心。</span>
     </section>
+    <section class="notice" id="refresh-notice" hidden aria-live="polite"></section>
     <section class="notice" id="core-notice" hidden aria-live="polite"></section>
     <section class="notice notice-warning" id="migration-notice" hidden>
       <strong>检测到旧版能力中心管理器</strong>
@@ -68,7 +72,7 @@
       <div class="catalog-head">
         <div>
           <h2 id="catalog-heading">能力目录</h2>
-          <p id="catalog-summary" class="catalog-summary">正在读取本机账本</p>
+          <p id="catalog-summary" class="catalog-summary">正在读取目录与本机状态</p>
         </div>
         <div class="connection" id="connection" data-state="idle" role="status" aria-live="polite">
           <span class="connection-dot" aria-hidden="true"></span>
@@ -81,7 +85,7 @@
           <button type="button" class="filter" data-filter="all" aria-pressed="true">全部</button>
           <button type="button" class="filter" data-filter="skill" aria-pressed="false">技能</button>
           <button type="button" class="filter" data-filter="plugin" aria-pressed="false">插件</button>
-          <button type="button" class="filter" data-filter="python" aria-pressed="false">Python 库</button>
+          <button type="button" class="filter" data-filter="mcp" aria-pressed="false">MCP</button>
           <button type="button" class="filter" data-filter="composite" aria-pressed="false">能力包</button>
           <button type="button" class="filter" data-filter="installed" aria-pressed="false">已安装</button>
         </div>
@@ -93,20 +97,20 @@
       </div>
 
       <div class="state-panel" id="state-panel" aria-live="polite">
-        <div class="empty-mark" aria-hidden="true">
-          <svg viewBox="0 0 48 48"><rect x="7" y="7" width="14" height="14" rx="2"/><rect x="27" y="7" width="14" height="14" rx="2"/><rect x="7" y="27" width="14" height="14" rx="2"/><path d="M34 27v14M27 34h14"/></svg>
-        </div>
+        <div class="empty-mark fish-tail-mark" aria-hidden="true"></div>
         <strong>正在读取能力</strong>
         <span>本机账本无需分发服务器即可管理已安装能力。</span>
       </div>
       <ol class="capability-list" id="capability-list" aria-label="能力目录"></ol>
     </section>
 
-    <p class="privacy-note">
-      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.8 16 5v4.3c0 3.7-2.4 6.3-6 7.9-3.6-1.6-6-4.2-6-7.9V5z"/><path d="m7.3 10 1.8 1.8 3.8-4"/></svg>
-      安装文件由内网服务器提供。安装与检查在本机完成，本机系统信息不会上传到分发服务器。
-    </p>
   </main>
+  <footer class="feedback-bar">
+    <button class="feedback-launch" id="feedback-launch" type="button" aria-haspopup="dialog">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4.5h12v9H9l-4 2.8v-2.8H4z"/><path d="M7 8h6M7 10.7h4"/></svg>
+      反馈
+    </button>
+  </footer>
   <dialog class="capability-dialog" id="capability-dialog" aria-labelledby="capability-dialog-title">
     <header class="detail-header">
       <h2 id="capability-dialog-title"></h2>
@@ -119,6 +123,25 @@
     <div class="detail-scroll" id="capability-dialog-scroll">
       <p class="detail-intro" id="capability-dialog-intro"></p>
       <div id="capability-dialog-content"></div>
+    </div>
+  </dialog>
+  <dialog class="feedback-dialog" id="feedback-dialog"
+    aria-labelledby="feedback-dialog-title" aria-describedby="feedback-dialog-intro feedback-config">
+    <header class="detail-header">
+      <div>
+        <h2 id="feedback-dialog-title">反馈问题或需求</h2>
+        <p class="dialog-intro" id="feedback-dialog-intro">将在系统默认邮件应用中打开草稿。</p>
+      </div>
+      <button class="button button-quiet detail-close" id="feedback-dialog-close" type="button" aria-label="关闭反馈">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg>
+      </button>
+    </header>
+    <div class="feedback-copy">
+      <p>请在邮件中填写问题及需求、能力版本、Windows/DSH 版本、步骤与结果，并附能说明问题的截图。</p>
+      <p id="feedback-config">正在读取反馈邮箱配置。</p>
+    </div>
+    <div class="feedback-actions">
+      <button class="button button-primary" id="feedback-submit" type="button" disabled>点击反馈</button>
     </div>
   </dialog>
   <script src="/capability-center/app.js" defer></script>

@@ -57,11 +57,42 @@ function serviceFor(home, context, options = {}) {
     http,
     dshHome: home,
     faultInjection: options.faultInjection,
+    feedbackEmail: options.feedbackEmail,
+    coreCheck: options.coreCheck,
+    coreStatus: options.coreStatus,
   })
 }
 
 async function wait(service, operation) {
   return await service.waitForOperation(operation.id)
+}
+
+async function handleRequest(service, route, { method = 'GET', body } = {}) {
+  const chunks = body === undefined
+    ? []
+    : [Buffer.from(JSON.stringify(body))]
+  const headers = body === undefined ? {} : { 'content-type': 'application/json' }
+  const req = {
+    method,
+    headers,
+    async *[Symbol.asyncIterator]() {
+      for (const chunk of chunks) yield chunk
+    },
+  }
+  const responseChunks = []
+  const res = {
+    statusCode: 0,
+    headers: new Map(),
+    setHeader(name, value) { this.headers.set(name.toLowerCase(), String(value)) },
+    end(value = '') { responseChunks.push(Buffer.from(value)) },
+  }
+  assert.equal(await service.handle(req, res, route, new URL(route, 'https://dsh.local')), true)
+  const raw = Buffer.concat(responseChunks).toString('utf8')
+  return {
+    status: res.statusCode,
+    headers: res.headers,
+    payload: raw === '' ? undefined : JSON.parse(raw),
+  }
 }
 
 async function installFull(service, base, id) {
@@ -188,6 +219,157 @@ test('fresh-home skill install and uninstall use real artifacts and leave no par
   } finally {
     await service.dispose()
     await server.close()
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
+test('runtime config exposes only a validated feedback email', async () => {
+  const home = await tempRoot('capability-center-feedback-config-')
+  const configured = serviceFor(home, fakeContext(), {
+    feedbackEmail: 'feedback@example.com',
+  })
+  const invalid = serviceFor(join(home, 'invalid'), fakeContext(), {
+    feedbackEmail: 'not-an-email',
+  })
+  try {
+    await configured.initialize()
+    const response = await handleRequest(configured, '/api/config')
+    assert.equal(response.status, 200)
+    assert.deepEqual(response.payload, { feedbackEmail: 'feedback@example.com' })
+
+    await invalid.initialize()
+    const empty = await handleRequest(invalid, '/api/config')
+    assert.equal(empty.status, 200)
+    assert.deepEqual(empty.payload, {})
+  } finally {
+    await configured.dispose()
+    await invalid.dispose()
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
+test('update summary uses installed versions and never probes the network offline', async () => {
+  const home = await tempRoot('capability-center-update-summary-')
+  const one = await readFile(await createSkillArchive(
+    join(home, 'packages', 'summary-skill-1.0.0.zip'),
+    'summary-skill',
+    '1.0.0',
+  ))
+  const two = await readFile(await createSkillArchive(
+    join(home, 'packages', 'summary-skill-1.1.0.zip'),
+    'summary-skill',
+    '1.1.0',
+  ))
+  const server = await startFileServer(new Map([
+    ['/catalog.json', Buffer.from(JSON.stringify(catalog([
+      skillItem('summary-skill', '1.0.0', 'packages/summary-skill-1.0.0.zip', one),
+    ])))],
+    ['/packages/summary-skill-1.0.0.zip', one],
+    ['/packages/summary-skill-1.1.0.zip', two],
+  ]))
+  let coreChecks = 0
+  const service = serviceFor(home, fakeContext({ skills: runtimeSkills() }), {
+    coreStatus: async () => ({
+      ready: true,
+      activeVersion: '0.2.0',
+      pending: { version: '0.2.1' },
+    }),
+    coreCheck: async () => {
+      coreChecks += 1
+      return {
+        updateAvailable: false,
+        currentVersion: '0.2.0',
+        latestVersion: '0.2.0',
+      }
+    },
+  })
+  try {
+    await service.initialize()
+    assert.equal((await installFull(service, server.base, 'summary-skill')).status, 'ready')
+    server.routes.set('/catalog.json', Buffer.from(JSON.stringify(catalog([
+      skillItem('summary-skill', '1.1.0', 'packages/summary-skill-1.1.0.zip', two),
+    ]))))
+
+    const online = await service.updateSummary(server.base)
+    assert.equal(online.attention, true)
+    assert.equal(online.core.pendingVersion, '0.2.1')
+    assert.equal(online.items['summary-skill'].installedVersion, '1.0.0')
+    assert.equal(online.items['summary-skill'].latestVersion, '1.1.0')
+    assert.equal(coreChecks, 1)
+
+    server.routes.set('/catalog.json', Buffer.from(JSON.stringify(catalog([{
+      ...skillItem('summary-skill', '1.1.0', 'packages/summary-skill-1.1.0.zip', two),
+      hidden: true,
+    }]))))
+    const hiddenOnline = await service.updateSummary(server.base)
+    assert.deepEqual(hiddenOnline.items, {})
+
+    server.routes.set('/catalog.json', Buffer.from(JSON.stringify(catalog([
+      skillItem('summary-skill', '1.1.0', 'packages/summary-skill-1.1.0.zip', two),
+    ]))))
+    service.ledger.get('summary-skill').manifest.hidden = true
+    const hiddenLocal = await service.updateSummary(server.base)
+    assert.deepEqual(hiddenLocal.items, {})
+
+    const offline = await service.updateSummary('')
+    assert.equal(offline.offline, true)
+    assert.equal(offline.attention, true)
+    assert.deepEqual(offline.items, {})
+    assert.equal(coreChecks, 3)
+  } finally {
+    await service.dispose()
+    await server.close()
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
+test('refresh verification reprobes real plugin manager runtime instead of cached health', async () => {
+  const home = await tempRoot('capability-center-refresh-runtime-')
+  const context = fakeContext({
+    bundles: [['runtime-plugin', {
+      name: 'runtime-plugin',
+      version: '1.0.0',
+      installed: true,
+      enabled: true,
+      rows: [{ entryId: 'runtime-row' }],
+    }]],
+    listPlugins: async () => [{
+      entryId: 'runtime-row',
+      enabled: true,
+      fiberPhase: 'active',
+    }],
+  })
+  const service = serviceFor(home, context, {
+    coreStatus: async () => ({
+      ready: true,
+      activeVersion: '0.2.0',
+      pending: null,
+    }),
+  })
+  try {
+    await service.initialize()
+    service.ledger.value.entries['runtime-plugin'] = {
+      id: 'runtime-plugin',
+      type: 'plugin',
+      version: '1.0.0',
+      source: 'intranet',
+      manifest: {
+        id: 'runtime-plugin',
+        type: 'plugin',
+        name: '运行时插件',
+        version: '1.0.0',
+        install: { packageName: 'runtime-plugin' },
+        checks: [{ type: 'plugin-bundle' }],
+      },
+      latestHealth: { status: 'failed', detail: 'stale cache' },
+      dependencyOwners: [],
+    }
+    const state = await service.refreshState('runtime-plugin')
+    assert.equal(state.plugins['runtime-plugin'].ready, true)
+    assert.equal(service.ledger.get('runtime-plugin').latestHealth.status, 'failed')
+    assert.equal(service.ledger.get('runtime-plugin').bundle, undefined)
+  } finally {
+    await service.dispose()
     await rm(home, { recursive: true, force: true })
   }
 })

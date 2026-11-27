@@ -1089,7 +1089,7 @@ export class DrawioCanvasService {
     })
   }
 
-  toolDefinitions() {
+  toolDefinitions(canCreate = () => false) {
     const boardInput = {
       boardId: { type: 'string', description: '画板 UUID；省略时使用当前会话最近创建的画板。' },
     }
@@ -1097,7 +1097,7 @@ export class DrawioCanvasService {
     return [
       {
         name: 'drawio_create',
-        description: '用户要在对话里绘图时，直接用此工具生成可编辑画板。先确定一套明确的视觉方向，再绘制结构与样式。'
+        description: '仅在用户本轮明确请求绘制图表或创建画板时调用。询问流程、原理或步骤（例如“OAuth 授权登录是什么流程”）应直接用文字回答。先确定视觉方向，再绘制结构与样式。'
           + '用户指定风格或颜色的部分最高优先级；否则根据主题、受众和场景选择 visualTheme：金融、法律、战略流程用 editorial，技术架构用 technical，'
           + '教育或生活主题用 warm，黑白报告用 monochrome。禁止使用 draw.io 默认蓝色 #dae8fc、绿色 #d5e8d4、紫色 #e1d5e7、黄色 #fff2cc、红色 #f8cecc。'
           + '默认由服务端按 role 套用高级配色；只有用户明确要求具体颜色或自定义风格确有必要时才传 style，并将 preserveDrawioPalette 设为 true。'
@@ -1158,7 +1158,13 @@ export class DrawioCanvasService {
           render: renderJson,
           presentationMeta: (_args, value) => boardMeta(value),
         },
-        execute: async (args, exec) => await this.createBoard(executionSession(exec), args),
+        execute: async (args, exec) => {
+          const sessionId = executionSession(exec)
+          if (!canCreate(exec.agent)) {
+            throw canvasError('drawing-not-requested', '本轮用户没有明确要求绘图，请直接用文字回答。', 403)
+          }
+          return await this.createBoard(sessionId, args)
+        },
       },
       {
         name: 'drawio_get_selection',
@@ -1287,10 +1293,10 @@ export class DrawioCanvasService {
     ]
   }
 
-  registerTools(registry) {
+  registerTools(registry, canCreate) {
     if (typeof registry?.register !== 'function') return []
     const disposers = []
-    for (const definition of this.toolDefinitions()) disposers.push(registry.register(definition))
+    for (const definition of this.toolDefinitions(canCreate)) disposers.push(registry.register(definition))
     return disposers
   }
 

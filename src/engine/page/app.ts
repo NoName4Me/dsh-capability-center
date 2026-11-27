@@ -2,9 +2,15 @@
   'use strict';
 
   const STORAGE_KEY = 'capability-center.serverUrl';
+  const OFFLINE_STORAGE_KEY = 'capability-center.offline';
+  const REFRESH_NOTICE_KEY = 'capability-center.refresh-pending';
+  const REFRESH_CLAIM_KEY = 'capability-center.refresh-claim';
+  const PLUGIN_REFRESH_KEY = 'capability-center.plugin-refresh-required';
   const TYPE_LABELS = { skill: '技能', plugin: '插件', python: 'Python 库', composite: '能力包' };
   const OPEN_DRAFT = 'capability-center/open-draft';
   const OPEN_DRAFT_ACK = 'capability-center/open-draft-ack';
+  const RELOAD_DSH = 'capability-center/reload-dsh';
+  const UPDATES_CHANGED = 'capability-center/updates-changed';
   const DRAFT_ACK_TIMEOUT_MS = 16_000;
   const DEV_DISTRIBUTION_META = 'capability-center-dev-distribution-url';
   type CapabilityType = keyof typeof TYPE_LABELS;
@@ -15,6 +21,7 @@
     name: string;
     version: string;
     type: CapabilityType;
+    category?: 'mcp';
     description: string;
     hidden?: boolean;
     trialAvailable?: boolean;
@@ -41,12 +48,17 @@
     version?: string | null;
     pending?: { version: string } | null;
     error?: string;
+    refreshBridge?: StatusPayload['refreshBridge'];
   }
 
   interface CoreCheck {
     updateAvailable: boolean;
     currentVersion: string;
     latestVersion: string | null;
+  }
+
+  interface RuntimeConfig {
+    feedbackEmail?: string | null;
   }
 
   interface StatusPayload {
@@ -57,6 +69,7 @@
     legacyManagerEnabled?: boolean;
     recoveryRequired?: boolean;
     recoveryMessages?: string[];
+    refreshBridge?: { reload?: boolean; overlay?: boolean; coreActivation?: boolean; nativeRestart?: boolean };
     core?: CoreStatus;
     preview?: boolean;
   }
@@ -68,6 +81,7 @@
     progress: number;
     logs: { message: string }[];
     terminal: boolean;
+    activation?: string;
     error?: string | null;
   }
 
@@ -82,7 +96,76 @@
     message: string;
   }
 
+  interface RequiredRefresh {
+    action: 'install' | 'update';
+    version: string;
+    at: number;
+  }
+
   type Attribute = string | boolean | EventListener | null | undefined;
+
+  function readRequiredRefreshes() {
+    const values = new Map<string, RequiredRefresh>();
+    try {
+      const stored = JSON.parse(sessionStorage.getItem(PLUGIN_REFRESH_KEY) || '{}');
+      if (typeof stored !== 'object' || stored === null || Array.isArray(stored)) return values;
+      for (const [id, entry] of Object.entries(stored)) {
+        if (!/^[a-z0-9][a-z0-9-]{0,63}$/u.test(id)
+          || typeof entry !== 'object' || entry === null
+          || !('action' in entry) || !['install', 'update'].includes(String(entry.action))
+          || !('version' in entry) || typeof entry.version !== 'string'
+          || entry.version.length === 0 || entry.version.length > 80) continue;
+        values.set(id, {
+          action: entry.action as RequiredRefresh['action'],
+          version: entry.version,
+          at: 'at' in entry && typeof entry.at === 'number' ? entry.at : 0,
+        });
+      }
+    } catch {
+      // Session storage may be unavailable in hardened host contexts.
+    }
+    return values;
+  }
+
+  function writeRequiredRefreshes(values: Map<string, RequiredRefresh>) {
+    try {
+      sessionStorage.setItem(PLUGIN_REFRESH_KEY, JSON.stringify(Object.fromEntries(values)));
+    } catch {
+      // The in-memory marker still lasts until this capability-center page closes.
+    }
+  }
+
+  function hostReloadedSince(at: number) {
+    if (at <= 0) return false;
+    try {
+      const host = window.parent === window ? window : window.parent;
+      return Number.isFinite(host.performance.timeOrigin) && host.performance.timeOrigin > at;
+    } catch {
+      return false;
+    }
+  }
+
+  function claimRefreshNotice() {
+    try {
+      const raw = sessionStorage.getItem(REFRESH_CLAIM_KEY);
+      if (raw !== null) {
+        const claim = JSON.parse(raw);
+        if (typeof claim?.at === 'number' && Date.now() - claim.at < 10_000) return false;
+      }
+      sessionStorage.setItem(REFRESH_CLAIM_KEY, JSON.stringify({ owner: 'frame', at: Date.now() }));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function releaseRefreshClaim() {
+    try {
+      sessionStorage.removeItem(REFRESH_CLAIM_KEY);
+    } catch {
+      // The fallback is optional when session storage is unavailable.
+    }
+  }
 
   function devDistributionUrl() {
     return document.querySelector<HTMLMetaElement>(
@@ -100,7 +183,7 @@
     catalog: [] as Capability[],
     localStates: {} as Record<string, LocalState>,
     online: false,
-    localOnly: false,
+    localOnly: localStorage.getItem(OFFLINE_STORAGE_KEY) === 'true',
     preview: false,
     onlineError: null as string | null,
     filter: 'all',
@@ -114,11 +197,17 @@
     pendingDraftRequests: new Map<string, { itemId: string; timer: number }>(),
     core: null as CoreStatus | null,
     coreCheck: null as CoreCheck | null,
-    coreBusy: null as 'check' | 'stage' | null,
+    coreBusy: null as 'check' | 'stage' | 'activate' | null,
     coreError: null as { title: string; detail: string } | null,
+    refreshRequired: readRequiredRefreshes(),
+    feedbackEmail: null as string | null,
+    refreshNotice: null as { message: string; version: string } | null,
     migration: false,
     recoveryRequired: false,
     recoveryMessages: [] as string[],
+    refreshBridge: { reload: false, overlay: false, coreActivation: false, nativeRestart: false },
+    restartPending: false,
+    restartError: '',
   };
 
   const elements = {
@@ -143,8 +232,14 @@
     coreCheck: requiredElement('core-check', HTMLButtonElement),
     coreStage: requiredElement('core-stage', HTMLButtonElement),
     coreNotice: requiredElement('core-notice', HTMLElement),
+    feedbackLaunch: requiredElement('feedback-launch', HTMLButtonElement),
+    feedbackDialog: requiredElement('feedback-dialog', HTMLDialogElement),
+    feedbackClose: requiredElement('feedback-dialog-close', HTMLButtonElement),
+    feedbackSubmit: requiredElement('feedback-submit', HTMLButtonElement),
+    feedbackConfig: requiredElement('feedback-config', HTMLElement),
     migrationNotice: requiredElement('migration-notice', HTMLElement),
     previewNotice: requiredElement('preview-notice', HTMLElement),
+    refreshNotice: requiredElement('refresh-notice', HTMLElement),
     recoveryNotice: requiredElement('recovery-notice', HTMLElement),
   };
 
@@ -238,9 +333,11 @@
     elements.statePanel.dataset.state = kind;
     elements.statePanel.replaceChildren();
     const mark = el('div', { className: 'empty-mark', 'aria-hidden': 'true' });
-    mark.innerHTML = kind === 'error'
-      ? '<svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="17"/><path d="M24 14v12M24 32v.2"/></svg>'
-      : '<svg viewBox="0 0 48 48"><rect x="7" y="7" width="14" height="14" rx="2"/><rect x="27" y="7" width="14" height="14" rx="2"/><rect x="7" y="27" width="14" height="14" rx="2"/><path d="M34 27v14M27 34h14"/></svg>';
+    if (kind === 'error') {
+      mark.innerHTML = '<svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="17"/><path d="M24 14v12M24 32v.2"/></svg>';
+    } else {
+      mark.classList.add('fish-tail-mark');
+    }
     elements.statePanel.append(mark, el('strong', {}, title), el('span', {}, detail));
   }
 
@@ -275,10 +372,31 @@
     state.migration = payload.legacyManagerEnabled === true;
     state.recoveryRequired = payload.recoveryRequired === true;
     state.recoveryMessages = payload.recoveryMessages || [];
+    applyRefreshBridge(payload.refreshBridge);
+    if (!state.refreshBridge.reload) {
+      state.refreshRequired.clear();
+      writeRequiredRefreshes(state.refreshRequired);
+    } else {
+      for (const [id, value] of state.refreshRequired) {
+        if (hostReloadedSince(value.at)) state.refreshRequired.delete(id);
+      }
+      writeRequiredRefreshes(state.refreshRequired);
+    }
     if (payload.core) state.core = { ...state.core, ...payload.core };
-    const visibleCount = state.catalog.filter(item => item.hidden !== true).length;
-    elements.summary.textContent = `${payload.catalog?.name || '能力目录'} · ${visibleCount} 项 · ${new Date().toLocaleTimeString('zh-CN', { hour12: false })} 更新`;
+    elements.summary.textContent = state.localOnly
+      ? '仅显示本机安装'
+      : state.online ? '可安装与更新' : '仅显示本机状态';
     renderStatusMessages();
+  }
+
+  function applyRefreshBridge(bridge: StatusPayload['refreshBridge']) {
+    if (bridge === undefined) return;
+    state.refreshBridge = {
+      reload: bridge.reload === true,
+      overlay: bridge.overlay === true,
+      coreActivation: bridge.coreActivation === true,
+      nativeRestart: bridge.nativeRestart === true,
+    };
   }
 
   async function requestJson<T>(url: string, options?: RequestInit): Promise<T> {
@@ -319,6 +437,7 @@
       state.loading = false;
       setLoading(false);
       render();
+      notifyHostOfUpdateState();
     }
   }
 
@@ -331,6 +450,7 @@
       return;
     }
     localStorage.setItem(STORAGE_KEY, serverUrl);
+    localStorage.setItem(OFFLINE_STORAGE_KEY, 'false');
     if (state.serverUrl !== serverUrl) {
       state.coreCheck = null;
       state.coreError = null;
@@ -342,6 +462,7 @@
 
   async function loadOffline() {
     state.localOnly = !state.localOnly;
+    localStorage.setItem(OFFLINE_STORAGE_KEY, String(state.localOnly));
     state.coreCheck = null;
     state.coreError = null;
     renderStatusMessages();
@@ -375,7 +496,8 @@
       if (item.hidden === true) return false;
       const local = localState(item);
       if (state.filter === 'installed' && !local.installed) return false;
-      if (!['all', 'installed'].includes(state.filter) && item.type !== state.filter) return false;
+      if (state.filter === 'mcp' && item.category !== 'mcp') return false;
+      if (!['all', 'installed', 'mcp'].includes(state.filter) && item.type !== state.filter) return false;
       if (!state.query) return true;
       const haystack = `${item.name} ${item.description} ${item.id} ${item.version}`.toLocaleLowerCase('zh-CN');
       return haystack.includes(state.query.toLocaleLowerCase('zh-CN'));
@@ -430,7 +552,7 @@
     const actions = el('div', { className: location === 'card' ? 'card-actions' : 'detail-actions' });
     const addAction = (key: string, label: string, run: () => void, primary = false, disabled = false) => {
       actions.append(el('button', {
-        className: `button ${primary ? 'button-primary' : 'button-quiet'}`,
+        className: `button ${primary ? 'button-primary' : 'button-quiet'}${key === 'uninstall' ? ' button-danger' : ''}`,
         type: 'button',
         [`data-${location}-action`]: key,
         disabled: locked || disabled,
@@ -439,6 +561,29 @@
       }, label));
     };
 
+    if (operation && !operation.terminal && (operation.action === 'install' || operation.action === 'update')) {
+      addAction(operation.action, operation.action === 'install' ? '安装中…' : '更新中…', () => {}, true, true);
+      return actions;
+    }
+    if (local.activation === 'restart-required' || operation?.status === 'restart-required') {
+      appendRestartAction(actions);
+    }
+    if (state.refreshRequired.has(item.id) && local.ready) {
+      if (state.refreshBridge.reload) {
+        addAction('refresh', '刷新页面生效', () => {
+          const refresh = state.refreshRequired.get(item.id);
+          requestDSHReload({
+            target: 'plugin',
+            itemId: item.id,
+            version: refresh?.version || local.currentVersion || item.version,
+            action: refresh?.action,
+          });
+        }, true);
+      } else {
+        actions.append(el('span', { className: 'detail-note' }, '已生效，请手动刷新页面'));
+      }
+      return actions;
+    }
     if (!local.installed) {
       addAction('install', '安装', () => runAction(item, 'install'), true, !state.online);
       return actions;
@@ -446,7 +591,7 @@
     const updatable = status.label === '可更新';
     if (updatable) addAction('update', '更新', () => runAction(item, 'update'), true);
     if (local.ready && item.trialAvailable !== false && typeof item.trial?.prompt === 'string') {
-      addAction('trial', '试用', () => openTrialDraft(item), !updatable);
+      addAction('trial', '去使用', () => openTrialDraft(item), !updatable);
     }
     if (location === 'detail') {
       addAction('diagnose', '检查与修复', () => runAction(item, 'diagnose'));
@@ -463,8 +608,14 @@
 
   function renderLocalStatus(item: Capability, status: ItemStatus) {
     const installed = localState(item).installed === true;
-    const label = installed && status.label !== '已安装' ? `已安装 · ${status.label}` : status.label;
-    return el('span', { className: 'local-state', 'data-state': status.kind, title: status.detail }, label);
+    const label = el('span', { className: 'local-state', 'data-state': status.kind, title: status.detail });
+    if (!installed || status.label === '可更新') {
+      label.textContent = status.label;
+      return label;
+    }
+    label.append(el('span', { className: 'installed-label' }, '已安装'));
+    if (status.label !== '已安装') label.append(`· ${status.label}`);
+    return label;
   }
 
   const CATEGORY_ICONS = {
@@ -475,7 +626,7 @@
   };
 
   function categoryIcon(type: CapabilityType) {
-    const icon = el('span', { className: 'capability-icon', 'data-type': type, 'aria-hidden': 'true' });
+    const icon = el('span', { className: 'capability-icon', 'aria-hidden': 'true' });
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('viewBox', '0 0 24 24');
     const path = document.createElementNS(svg.namespaceURI, 'path');
@@ -512,7 +663,9 @@
     const attempt = state.draftAttempts.get(item.id);
     footer.append(renderLocalStatus(item, status), renderActions(item, status, 'card'));
     listItem.append(card, footer);
-    if (operation || attempt) {
+    if (operation && (!operation.terminal || operation.status === 'failed')) {
+      listItem.append(renderOperation(item, operation, true));
+    } else if (operation || attempt) {
       const feedback = el('p', { className: 'card-feedback', role: 'status' });
       const message = operation?.error ?? attempt?.message ?? operation?.phase;
       feedback.textContent = message ?? '';
@@ -614,18 +767,17 @@
     return host;
   }
 
-  function renderOperation(item: Capability, operation: Operation) {
+  function renderOperation(item: Capability, operation: Operation, compact = false) {
     const root = el('section', {
-      className: 'operation',
+      className: compact ? 'operation card-operation' : 'operation',
       'data-status': operation.status,
       'aria-label': `${item.name} ${operation.action}状态`,
     });
     const head = el('div', { className: 'operation-head' });
     const label = { install: '安装', update: '更新', diagnose: '检查', uninstall: '卸载' }[operation.action] || operation.action;
-    head.append(
-      el('span', { className: 'operation-title' }, `${label}进度`),
-      el('span', { className: 'operation-phase', role: 'status' }, operation.phase),
-    );
+    if (!compact) head.append(el('span', { className: 'operation-title' }, `${label}进度`));
+    head.append(el('span', { className: 'operation-phase', role: 'status' },
+      operation.status === 'failed' ? `${label}失败` : operation.phase));
     const track = el('div', {
       className: 'progress-track',
       role: 'progressbar',
@@ -637,12 +789,16 @@
     const value = el('div', { className: 'progress-value' });
     value.style.width = `${Math.round((operation.progress || 0) * 100)}%`;
     track.append(value);
-    root.append(head, track);
-    if (operation.error) root.append(el('p', { className: 'operation-error' }, operation.error));
-    if (operation.logs?.length) {
+    root.append(head);
+    if (!operation.terminal || !compact && operation.status !== 'failed') root.append(track);
+    if (operation.status === 'failed' || !compact && operation.logs?.length) {
+      const details = el('details', { className: 'operation-details' });
+      details.append(el('summary', {}, '查看详情'));
+      if (operation.error) details.append(el('p', { className: 'operation-error' }, operation.error));
       const logs = el('ol', { className: 'log-list' });
-      for (const entry of operation.logs) logs.append(el('li', {}, entry.message));
-      root.append(logs);
+      for (const entry of operation.logs ?? []) logs.append(el('li', {}, entry.message));
+      if (logs.childElementCount > 0) details.append(logs);
+      root.append(details);
     }
     return root;
   }
@@ -675,7 +831,7 @@
       await pollOperation(item, payload.operation.id);
     } catch (error) {
       state.operations.set(item.id, {
-        ...placeholder,
+        ...(state.operations.get(item.id) ?? placeholder),
         status: 'failed',
         terminal: true,
         phase: '失败',
@@ -697,9 +853,102 @@
       refreshItem(item);
       if (operation.terminal) {
         await load(activeServerUrl(), { background: true });
+        const local = state.localStates[item.id];
+        if (state.refreshBridge.reload
+          && operation.status === 'ready'
+          && operation.activation === 'applied'
+          && ['install', 'update'].includes(operation.action)
+          && item.type === 'plugin'
+          && local?.ready === true) {
+          state.refreshRequired.set(item.id, {
+            action: operation.action as 'install' | 'update',
+            version: local.currentVersion || item.version,
+            at: Date.now(),
+          });
+          writeRequiredRefreshes(state.refreshRequired);
+          refreshItem(item);
+        }
+        notifyHostOfUpdateState();
         return;
       }
     }
+  }
+
+  function notifyHostOfUpdateState() {
+    if (window.parent === window) return;
+    window.parent.postMessage({
+      type: UPDATES_CHANGED,
+      origin: window.location.origin,
+    }, window.location.origin);
+  }
+
+  function appendRestartAction(container: HTMLElement) {
+    if (state.preview) return;
+    if (state.refreshBridge.nativeRestart) {
+      container.append(el('button', {
+        className: 'button button-primary',
+        type: 'button',
+        disabled: state.restartPending || [...state.operations.values()].some(operation => !operation.terminal),
+        onclick: requestHostRestart,
+      }, state.restartPending ? '正在重启…' : '重启 DSH'));
+    } else {
+      container.append(el('span', { className: 'detail-note' }, '请退出并重新打开 DSH'));
+    }
+    if (state.restartError) {
+      container.append(el('span', { className: 'operation-error', role: 'status' }, state.restartError));
+    }
+  }
+
+  async function requestHostRestart() {
+    if (state.restartPending || !window.confirm('重启会中断运行中的会话。现在重启 DSH？')) return;
+    state.restartPending = true;
+    state.restartError = '';
+    render();
+    renderStatusMessages();
+    try {
+      await requestJson('/capability-center/api/host/restart', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-capability-center': '1' },
+        body: JSON.stringify({ confirm: true }),
+      });
+      await new Promise(resolve => window.setTimeout(resolve, 12_000));
+      state.restartError = '若 DSH 尚未重开，请退出并重新打开。';
+    } catch (error) {
+      state.restartError = error instanceof Error ? error.message : String(error);
+    } finally {
+      state.restartPending = false;
+      render();
+      renderStatusMessages();
+    }
+  }
+
+  function requestDSHReload({
+    target,
+    itemId,
+    version,
+    action,
+  }: {
+    target: 'plugin' | 'core';
+    itemId: string;
+    version: string;
+    action?: 'install' | 'update';
+  }) {
+    if (window.parent === window) {
+      state.coreError = {
+        title: '需要在 DSH 中刷新',
+        detail: '独立预览不能刷新 DSH 顶层页面。',
+      };
+      renderStatusMessages();
+      return;
+    }
+    window.parent.postMessage({
+      type: RELOAD_DSH,
+      target,
+      itemId,
+      version: version.slice(0, 80),
+      action: target === 'core' ? 'activate' : action ?? 'update',
+      origin: window.location.origin,
+    }, window.location.origin);
   }
 
   function draftRequestId() {
@@ -723,7 +972,7 @@
     if (window.parent === window) {
       setDraftAttempt(item.id, {
         status: 'error',
-        message: '独立预览无法创建 DSH 会话。请从 DSH 侧栏“能力中心”打开后试用。',
+        message: '请从 DSH 侧栏打开能力中心，再点击“去使用”。',
       });
       return;
     }
@@ -762,7 +1011,7 @@
       state.pendingDraftRequests.delete(requestId);
       setDraftAttempt(item.id, {
         status: 'error',
-        message: `试用未打开：${error instanceof Error ? error.message : String(error)}`,
+        message: `会话未打开：${error instanceof Error ? error.message : String(error)}`,
       });
     }
   }
@@ -788,11 +1037,18 @@
     const error = 'error' in message && typeof message.error === 'string' && message.error.trim()
       ? message.error.trim().slice(0, 240)
       : 'DSH 未能创建新会话草稿。';
-    setDraftAttempt(pending.itemId, { status: 'error', message: `试用未打开：${error}` });
+    setDraftAttempt(pending.itemId, { status: 'error', message: `会话未打开：${error}` });
   }
 
   function renderStatusMessages() {
     elements.previewNotice.hidden = !state.preview;
+    elements.refreshNotice.hidden = state.refreshNotice === null;
+    if (state.refreshNotice !== null) {
+      elements.refreshNotice.replaceChildren(
+        el('strong', {}, state.refreshNotice.message),
+        el('span', {}, `能力中心 v${state.refreshNotice.version} 已恢复显示。`),
+      );
+    }
     elements.migrationNotice.hidden = !state.migration;
     elements.recoveryNotice.hidden = !state.recoveryRequired;
     if (state.recoveryRequired) {
@@ -813,13 +1069,17 @@
     let title: string;
     let detail: string;
     if (pending?.version) {
-      title = `重启 DSH 后更新到 v${pending.version}`;
-      detail = '更新已下载。当前版本继续运行，可等手头任务完成后再重启。';
+      title = `核心 v${pending.version} 已暂存`;
+      detail = state.refreshBridge.coreActivation
+        ? '点击“刷新生效”激活候选核心。旧核心会先停止接受新操作，失败时自动回退。'
+        : '当前稳定引导不支持热切换；下次启动 DSH 时会兼容激活候选核心。';
     } else if (state.coreError) {
       ({ title, detail } = state.coreError);
     } else if (check?.updateAvailable) {
       title = `发现新版本 v${check.latestVersion}`;
-      detail = '下载后需重启 DSH 才会生效。下载期间可以继续工作。';
+      detail = state.refreshBridge.coreActivation
+        ? '下载后点击“刷新生效”。'
+        : '下载后重新打开 DSH 即可生效。';
     } else if (check) {
       title = check.latestVersion === null
         ? '分发服务器没有兼容版本'
@@ -831,10 +1091,21 @@
       elements.coreNotice.hidden = true;
       return;
     }
-    elements.coreNotice.dataset.state = pending ? 'restart' : state.coreError ? 'error' : 'info';
+    elements.coreNotice.dataset.state = pending ? 'refresh' : state.coreError ? 'error' : 'info';
     elements.coreNotice.replaceChildren(el('strong', {}, title));
     if (detail) elements.coreNotice.append(el('span', {}, detail));
     if (pending && state.coreError) elements.coreNotice.append(el('span', {}, state.coreError.detail));
+    if (pending?.version && state.refreshBridge.coreActivation) {
+      const activate = el('button', {
+        className: 'button button-primary',
+        type: 'button',
+        disabled: state.coreBusy !== null,
+        onclick: activateCoreUpdate,
+      }, state.coreBusy === 'activate' ? '正在切换' : '刷新生效');
+      elements.coreNotice.append(activate);
+    } else if (pending?.version) {
+      appendRestartAction(elements.coreNotice);
+    }
     elements.coreNotice.hidden = false;
   }
 
@@ -842,6 +1113,7 @@
     try {
       const payload = await requestJson<CoreStatus>('/capability-center/api/core/status', { headers: { accept: 'application/json' } });
       state.core = payload;
+      applyRefreshBridge(payload.refreshBridge);
     } catch (error) {
       state.core = { version: null, error: error instanceof Error ? error.message : String(error) };
     }
@@ -882,7 +1154,7 @@
     state.coreError = null;
     renderStatusMessages();
     try {
-      const payload = await requestJson<{ version: string }>('/capability-center/api/core/stage', {
+      const payload = await requestJson<{ version: string; refreshRequired?: boolean }>('/capability-center/api/core/stage', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -891,6 +1163,8 @@
         body: JSON.stringify({ serverUrl }),
       });
       state.core = { ...state.core, pending: { version: payload.version } };
+      if (payload.refreshRequired === true) state.refreshBridge.coreActivation = true;
+      state.coreCheck = null;
     } catch (error) {
       if (serverUrl === activeServerUrl()) {
         state.coreError = {
@@ -902,6 +1176,181 @@
       state.coreBusy = null;
       renderStatusMessages();
     }
+  }
+
+  async function activateCoreUpdate() {
+    const pending = state.core?.pending;
+    if (!pending?.version || state.coreBusy) return;
+    state.coreBusy = 'activate';
+    state.coreError = null;
+    renderStatusMessages();
+    try {
+      const payload = await requestJson<{
+        activated: boolean;
+        activeVersion: string;
+        version: string;
+        rolledBack?: boolean;
+      }>('/capability-center/api/core/activate', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-capability-center': '1',
+        },
+        body: JSON.stringify({ version: pending.version }),
+      });
+      if (payload.activated !== true || payload.activeVersion !== payload.version) {
+        throw new Error('宿主未确认候选核心已接管请求。');
+      }
+      state.core = {
+        ...state.core,
+        activeVersion: payload.activeVersion,
+        version: payload.activeVersion,
+        pending: null,
+      };
+      requestDSHReload({
+        target: 'core',
+        itemId: 'capability-center-core',
+        version: payload.activeVersion,
+        action: 'update',
+      });
+    } catch (error) {
+      state.coreError = {
+        title: '核心切换失败',
+        detail: error instanceof Error ? error.message : String(error),
+      };
+      await loadCoreStatus();
+    } finally {
+      state.coreBusy = null;
+      renderStatusMessages();
+    }
+  }
+
+  async function loadRuntimeConfig() {
+    try {
+      const payload = await requestJson<RuntimeConfig>('/capability-center/api/config', {
+        headers: { accept: 'application/json' },
+      });
+      state.feedbackEmail = typeof payload.feedbackEmail === 'string'
+        && payload.feedbackEmail.trim() !== ''
+        ? payload.feedbackEmail.trim()
+        : null;
+    } catch {
+      state.feedbackEmail = null;
+    }
+    elements.feedbackSubmit.disabled = state.feedbackEmail === null;
+    elements.feedbackConfig.hidden = state.feedbackEmail !== null;
+    elements.feedbackConfig.textContent = state.feedbackEmail === null ? '反馈邮箱尚未配置。' : '';
+  }
+
+  async function consumeRefreshNotice() {
+    for (const delay of [1_800, 4_500, 4_500]) {
+      await new Promise(resolve => window.setTimeout(resolve, delay));
+      let raw: string | null;
+      try {
+        raw = sessionStorage.getItem(REFRESH_NOTICE_KEY);
+      } catch {
+        return;
+      }
+      if (raw === null) return;
+      if (!claimRefreshNotice()) continue;
+      try {
+        const value = JSON.parse(raw);
+        if (!['plugin', 'core'].includes(value?.target)
+          || typeof value?.itemId !== 'string'
+          || typeof value?.version !== 'string'
+          || value.version.length === 0
+          || value.version.length > 80
+          || (value.target === 'core'
+            ? value.action !== 'activate'
+            : !['install', 'update'].includes(value.action))) {
+          releaseRefreshClaim();
+          return;
+        }
+        const payload = await requestJson<{
+          core?: { ready?: boolean; activeVersion?: string | null };
+          plugins?: Record<string, { ready?: boolean; currentVersion?: string | null; name?: string }>;
+        }>(value.target === 'plugin'
+          ? `/capability-center/api/refresh-state?itemId=${encodeURIComponent(value.itemId)}`
+          : '/capability-center/api/refresh-state', {
+          headers: { accept: 'application/json' },
+        });
+        if (value.target === 'core') {
+          if (payload.core?.ready === true && payload.core.activeVersion === value.version) {
+            sessionStorage.removeItem(REFRESH_NOTICE_KEY);
+            sessionStorage.removeItem(PLUGIN_REFRESH_KEY);
+            state.refreshRequired.clear();
+            state.refreshNotice = {
+              message: `能力中心核心 v${value.version} 已生效。`,
+              version: value.version,
+            };
+          }
+        } else {
+          const item = payload.plugins?.[value.itemId];
+          if (item?.ready === true && item.currentVersion === value.version) {
+            sessionStorage.removeItem(REFRESH_NOTICE_KEY);
+            state.refreshRequired.delete(value.itemId);
+            writeRequiredRefreshes(state.refreshRequired);
+            state.refreshNotice = {
+              message: `${item.name || value.itemId} v${value.version} 已生效。`,
+              version: value.version,
+            };
+          }
+        }
+        releaseRefreshClaim();
+        renderStatusMessages();
+        if (state.refreshNotice !== null) return;
+      } catch {
+        releaseRefreshClaim();
+      }
+    }
+  }
+
+  function renderFeedbackDraft() {
+    const email = state.feedbackEmail;
+    if (email === null) return;
+    const body = [
+      '反馈类型（问题 / 需求）',
+      '',
+      '',
+      '相关能力及版本',
+      '',
+      '',
+      'Windows 版本',
+      'Windows 7 / Windows 10：',
+      '',
+      'DSH 版本',
+      '',
+      '',
+      '复现步骤',
+      '',
+      '',
+      '实际结果',
+      '',
+      '',
+      '期望结果',
+      '',
+      '',
+      '截图',
+      '请在此说明并作为附件添加。',
+      '',
+      '能力中心核心',
+      state.core?.activeVersion ? `v${state.core.activeVersion}` : '未知',
+    ].join('\r\n').slice(0, 8_000);
+    const subject = '[能力中心反馈] 问题或需求';
+    const anchor = document.createElement('a');
+    anchor.href = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    anchor.rel = 'noopener';
+    anchor.tabIndex = -1;
+    anchor.setAttribute('aria-hidden', 'true');
+    anchor.style.position = 'fixed';
+    anchor.style.width = '1px';
+    anchor.style.height = '1px';
+    anchor.style.overflow = 'hidden';
+    anchor.style.opacity = '0';
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    elements.feedbackDialog.close();
   }
 
   elements.detailDialog.addEventListener('click', event => {
@@ -919,6 +1368,15 @@
   elements.offlineButton.addEventListener('click', loadOffline);
   elements.coreCheck.addEventListener('click', checkCoreUpdate);
   elements.coreStage.addEventListener('click', stageCoreUpdate);
+  elements.feedbackLaunch.addEventListener('click', () => {
+    elements.feedbackDialog.showModal();
+    elements.feedbackSubmit.focus();
+  });
+  elements.feedbackClose.addEventListener('click', () => elements.feedbackDialog.close());
+  elements.feedbackDialog.addEventListener('click', event => {
+    if (event.target === elements.feedbackDialog) elements.feedbackDialog.close();
+  });
+  elements.feedbackSubmit.addEventListener('click', renderFeedbackDraft);
   window.addEventListener('message', handleDraftAck);
   elements.filters.addEventListener('click', event => {
     if (!(event.target instanceof Element)) return;
@@ -956,6 +1414,7 @@
   window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change', syncHostTheme);
 
   elements.serverUrl.value = state.serverUrl;
+  void consumeRefreshNotice();
   setLoading(false);
-  void Promise.all([loadCoreStatus(), load(state.serverUrl)]);
+  void Promise.all([loadRuntimeConfig(), loadCoreStatus(), load(state.serverUrl)]);
 })();

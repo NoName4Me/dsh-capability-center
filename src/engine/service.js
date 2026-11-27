@@ -45,6 +45,7 @@ const runFile = promisify(execFile)
 const TERMINAL = new Set(['ready', 'restart-required', 'failed'])
 const REQUEST_ID = /^[A-Za-z0-9_-]{8,96}$/u
 const MAX_PROMPT_LENGTH = 4_000
+const FEEDBACK_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u
 const LEGACY_IDS = new Set(['report-format', 'dsh-local-sysinfo', 'python-tabulate'])
 const AUTO_CONTINUE_ID = 'dsh-intranet-auto-continue'
 const OFFICE_ROOT_ID = 'office-enhancement'
@@ -63,6 +64,7 @@ const STATIC = new Map([
   ['/index.html', ['index.html', 'text/html; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
   ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
+  ['/icon.svg', ['icon.svg', 'image/svg+xml']],
 ])
 
 function messageOf(error) {
@@ -247,6 +249,7 @@ function localDisplayItem(entry) {
     trial: { prompt },
     install: source.install,
     hidden: source.hidden === true,
+    category: source.category === 'mcp' ? 'mcp' : undefined,
     legacy: entry.legacy === true,
     localOnly: true,
   }
@@ -270,16 +273,42 @@ export class CoreService {
     this.legacyManagerEnabled = false
     this.faultInjection = runtime.faultInjection
     this.devDistributionUrl = runtime.devDistributionUrl
+    this.acceptingWork = true
+    this.feedbackEmail = typeof runtime.feedbackEmail === 'string'
+      && runtime.feedbackEmail.length <= 254
+      && FEEDBACK_EMAIL.test(runtime.feedbackEmail.trim())
+      ? runtime.feedbackEmail.trim()
+      : undefined
+    this.initialized = false
   }
 
   async initialize() {
-    await mkdir(this.dataRoot, { recursive: true })
-    await this.ledger.open()
-    await this.recoverInterrupted()
-    if (this.recoveryRequired) return
-    await this.migrateLegacy()
-    await this.syncAllSkills()
-    await this.refreshRestartRequired()
+    try {
+      await mkdir(this.dataRoot, { recursive: true })
+      await this.ledger.open()
+      await this.recoverInterrupted()
+      if (this.recoveryRequired) return
+      await this.migrateLegacy()
+      await this.syncAllSkills()
+      await this.refreshRestartRequired()
+    } finally {
+      this.initialized = true
+    }
+  }
+
+  verify() {
+    if (this.disposed || !this.initialized || !this.acceptingWork) {
+      throw new Error('核心服务尚未完成初始化或已经停止。')
+    }
+    return { ready: true, version: this.version }
+  }
+
+  stopAcceptingWork() {
+    this.acceptingWork = false
+  }
+
+  async drain() {
+    await this.queue.catch(() => undefined)
   }
 
   async recoverInterrupted() {
@@ -662,6 +691,7 @@ export class CoreService {
       recoveryRequired: this.recoveryRequired,
       recoveryMessages: this.recoveryMessages,
       legacyManagerEnabled: this.legacyManagerEnabled,
+      refreshBridge: this.runtime.refreshBridge,
       core: {
         version: this.version,
         protocolVersion: 1,
@@ -713,7 +743,9 @@ export class CoreService {
   }
 
   startAction(serverUrl, itemId, action) {
-    if (this.disposed) throw new CapabilityError('disposed', '能力中心核心正在关闭。')
+    if (this.disposed || !this.acceptingWork) {
+      throw new CapabilityError('disposed', '能力中心核心正在关闭或切换。')
+    }
     if (this.recoveryRequired) {
       throw new CapabilityError('recovery-required', '存在无法证明已恢复的中断操作；请先处理恢复提示再继续。')
     }
@@ -767,6 +799,10 @@ export class CoreService {
     return this.publicOperation(operation)
   }
 
+  hasPendingActions() {
+    return [...this.operations.values()].some(operation => !TERMINAL.has(operation.status))
+  }
+
   async execute(serverUrl, itemId, action, operation) {
     let online
     let onlineError
@@ -794,7 +830,7 @@ export class CoreService {
     return await this.install(online, item, operation)
   }
 
-  async preparePlan(catalog, rootId) {
+  async preparePlan(catalog, rootId, operation) {
     validateGraph(catalog)
     const plan = planCapabilities(catalog, rootId)
     const artifacts = new Map()
@@ -802,8 +838,9 @@ export class CoreService {
     const externalPypdf = new Map()
     const needsPython = plan.order.some(item => item.type === 'python'
       || item.compatibility?.python !== undefined)
+    this.transition(operation, 'running', '检查安装环境', { progress: 0.08 })
     const pythonRuntime = needsPython ? await this.workspaceDependencies() : undefined
-    for (const item of plan.order) {
+    for (const [index, item] of plan.order.entries()) {
       const incompatibility = compatibilityError(item, { pythonVersion: pythonRuntime?.version })
       if (incompatibility !== undefined) {
         throw new CapabilityError('incompatible-capability', `${item.name} 不兼容：${incompatibility}`)
@@ -837,6 +874,9 @@ export class CoreService {
             externalPypdf.set(item.id, probe)
           }
         }
+        this.transition(operation, 'running', `下载并校验 ${item.name}`, {
+          progress: 0.12 + (index / plan.order.length) * 0.36,
+        })
         artifacts.set(item.id, await downloadArtifact(item, this.dataRoot, this.runtime.http))
       }
     }
@@ -874,7 +914,7 @@ export class CoreService {
     if (state?.version === rootItem.version && this.versionAtLeast(state.version, rootItem.version)) {
       return await this.diagnose(rootItem, operation)
     }
-    const plan = await this.preparePlan(catalog, rootItem.id)
+    const plan = await this.preparePlan(catalog, rootItem.id, operation)
     this.validatePinnedDependents(plan)
     await this.preflightOwnership(plan)
     return await this.applyPlan(plan, operation, { action: 'install', rootId: rootItem.id })
@@ -892,7 +932,7 @@ export class CoreService {
     if (comparison === 0) {
       throw new CapabilityError('VERSION_UNCHANGED', `已安装 ${entry.version}，没有更高版本。`)
     }
-    const plan = await this.preparePlan(catalog, item.id)
+    const plan = await this.preparePlan(catalog, item.id, operation)
     this.validatePinnedDependents(plan)
     await this.preflightOwnership(plan)
     return await this.applyPlan(plan, operation, { action: 'update', rootId: item.id })
@@ -1102,7 +1142,7 @@ export class CoreService {
     try {
       for (const [index, item] of plan.order.entries()) {
         this.transition(operation, 'running', `安装 ${item.name}`, {
-          progress: 0.1 + (index / Math.max(1, plan.order.length)) * 0.65,
+          progress: 0.5 + (index / Math.max(1, plan.order.length)) * 0.31,
         })
         const existing = this.ledger.get(item.id)
         if (item.type === 'composite') {
@@ -2053,6 +2093,9 @@ export class CoreService {
   }
 
   async prepareTrial(serverUrl, itemId, requestId, source, origin) {
+    if (this.disposed || !this.acceptingWork) {
+      throw new CapabilityError('disposed', '能力中心核心正在关闭或切换。')
+    }
     if (typeof requestId !== 'string' || !REQUEST_ID.test(requestId)) {
       throw new CapabilityError('invalid-request', '试用请求 ID 无效。')
     }
@@ -2115,6 +2158,7 @@ export class CoreService {
   }
 
   transition(operation, status, phase, extra = {}) {
+    if (status === 'running' && operation.phase !== phase) this.log(operation, phase)
     Object.assign(operation, extra, { status, phase, updatedAt: new Date().toISOString() })
   }
 
@@ -2151,6 +2195,96 @@ export class CoreService {
       targetDsh: '0.2.1-rc.2',
       recoveryRequired: this.recoveryRequired,
       recoveryMessages: this.recoveryMessages,
+      refreshBridge: this.runtime.refreshBridge,
+    }
+  }
+
+  async updateSummary(serverUrl) {
+    const localCore = typeof this.runtime.coreStatus === 'function'
+      ? await this.runtime.coreStatus()
+      : await this.coreStatus()
+    const core = {
+      activeVersion: localCore.activeVersion ?? this.version,
+      pendingVersion: localCore.pending?.version ?? null,
+      latestVersion: null,
+      updateAvailable: false,
+    }
+    if (typeof serverUrl === 'string' && serverUrl.trim() !== ''
+      && typeof this.runtime.coreCheck === 'function') {
+      try {
+        const checked = await this.runtime.coreCheck(serverUrl)
+        core.latestVersion = checked.latestVersion ?? null
+        core.updateAvailable = checked.updateAvailable === true
+      } catch {
+        // A failed remote check is not evidence that an update exists.
+      }
+    }
+
+    const items = {}
+    if (typeof serverUrl === 'string' && serverUrl.trim() !== '') {
+      try {
+        const online = await this.catalog(serverUrl)
+        for (const entry of this.ledger.list()) {
+          const candidate = online.items.find(item => item.id === entry.id)
+          if (candidate === undefined) continue
+          const local = localDisplayItem(entry)
+          if (candidate.hidden === true || local.hidden === true) continue
+          const updateAvailable = compareVersions(candidate.version, entry.version) > 0
+          if (!updateAvailable) continue
+          items[entry.id] = {
+            name: candidate.name,
+            installedVersion: entry.version,
+            latestVersion: candidate.version,
+            updateAvailable: true,
+          }
+        }
+      } catch {
+        // Offline or malformed catalogs cannot produce a positive badge.
+      }
+    }
+
+    return {
+      attention: core.pendingVersion !== null
+        || core.updateAvailable
+        || Object.keys(items).length > 0,
+      offline: !(typeof serverUrl === 'string' && serverUrl.trim() !== ''),
+      core,
+      items,
+    }
+  }
+
+  async refreshState(itemId) {
+    const core = typeof this.runtime.coreStatus === 'function'
+      ? await this.runtime.coreStatus()
+      : await this.coreStatus()
+    const plugins = {}
+    for (const entry of this.ledger.list()) {
+      if (entry.type !== 'plugin') continue
+      if (typeof itemId === 'string' && itemId !== '' && entry.id !== itemId) continue
+      const item = localDisplayItem(entry)
+      const health = await this.checkPluginBundle(item, {
+        ...entry,
+        bundle: entry.bundle === undefined ? undefined : { ...entry.bundle },
+      }).catch(error => ({
+        status: 'failed',
+        detail: messageOf(error),
+      }))
+      const ready = health.status === 'ready'
+      plugins[entry.id] = {
+        name: item.name,
+        version: entry.version,
+        currentVersion: entry.version,
+        ready,
+        activation: health.status,
+      }
+    }
+    return {
+      core: {
+        ready: core.ready === true,
+        activeVersion: core.activeVersion ?? null,
+        pendingVersion: core.pending?.version ?? null,
+      },
+      plugins,
     }
   }
 
@@ -2190,6 +2324,23 @@ export class CoreService {
     try {
       if (route === '/api/core/status') {
         this.sendJson(res, 200, await this.coreStatus())
+        return true
+      }
+      if (route === '/api/config') {
+        if (req.method !== 'GET') throw Object.assign(new Error('Method not allowed'), { status: 405 })
+        this.sendJson(res, 200, this.feedbackEmail === undefined
+          ? {}
+          : { feedbackEmail: this.feedbackEmail })
+        return true
+      }
+      if (route === '/api/updates') {
+        if (req.method !== 'GET') throw Object.assign(new Error('Method not allowed'), { status: 405 })
+        this.sendJson(res, 200, await this.updateSummary(url.searchParams.get('server') ?? ''))
+        return true
+      }
+      if (route === '/api/refresh-state') {
+        if (req.method !== 'GET') throw Object.assign(new Error('Method not allowed'), { status: 405 })
+        this.sendJson(res, 200, await this.refreshState(url.searchParams.get('itemId') ?? undefined))
         return true
       }
       if (route === '/api/status') {
@@ -2276,8 +2427,9 @@ export class CoreService {
   }
 
   async dispose() {
+    this.stopAcceptingWork()
     this.disposed = true
-    await this.queue
+    await this.drain()
     for (const dispose of this.skillDisposers.values()) dispose()
     this.skillDisposers.clear()
   }

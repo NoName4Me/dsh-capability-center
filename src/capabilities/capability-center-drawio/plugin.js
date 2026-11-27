@@ -191,17 +191,43 @@ async function sendAsset(req, res, route) {
   })
 }
 
+function explicitlyRequestsDrawing(text) {
+  if (/(?:不要|不用|无需|不必|别|禁止)[^，。！？\n]{0,14}(?:画|绘制|制图|draw\.io)|\b(?:do not|don't|no need to)\s+(?:draw|diagram|sketch)\b/iu.test(text)) {
+    return false
+  }
+  return text.split(/[。！？；\n]/u).some(clause =>
+    /(?:^|[，,：:]|(?:请|能否|能不能|可以|帮我|给我|为我|想请你|麻烦你)\s*)(?:用\s*draw\.io\s*)?(?:画出?|绘制|生成|制作|创建|做|绘画)[^，,]{0,60}(?:图|画板|画布|diagram)/iu.test(clause.trim())
+    || /(?:^|[，,：:]|帮我|给我|请)\s*(?:画一下|画一张|画一个|画个)/u.test(clause.trim())
+    || /(?:^|[，,：:]|帮我|给我|请)\s*(?:把|将)[^，,]{1,80}(?:画成|绘制成|做成|转成)[^，,]{0,24}(?:图|画板|画布)/u.test(clause.trim())
+    || /^(?:(?:please|(?:can|could|would) you)\s+)*(?:draw|sketch|create|make|generate)\s+(?:me\s+)?(?:an?\s+)?(?:[\w-]+\s+){0,6}(?:diagram|flowchart|canvas)\b/iu.test(clause.trim()))
+}
+
 export function apply(ctx) {
+  const drawingRequests = new WeakMap()
   const service = new DrawioCanvasService({
     dataRoot: join(dshHome(), 'capability-center-drawio'),
   })
-  const toolDisposers = service.registerTools(ctx.tools)
+  const toolDisposers = service.registerTools(ctx.tools, agent => drawingRequests.get(agent) === true)
   const ready = service.initialize()
   ready.catch(error => ctx.logger?.warn?.(`capability-center-drawio: ${error?.message ?? error}`))
 
-  ctx.on('agent/pre-step', async ({ agent, step, signal }, next) => {
+  ctx.on('agent/pre-step', async ({ agent, messages, step, signal }, next) => {
     const decision = await next()
-    if (decision.kind === 'reject' || signal.aborted || step !== 1) return decision
+    if (!agent) return decision
+    if (decision.kind === 'reject' || signal.aborted) {
+      drawingRequests.delete(agent)
+      return decision
+    }
+    const human = Array.isArray(messages)
+      ? messages.findLast(message => message?.role === 'user' && message.source?.kind === 'user')
+      : undefined
+    if (human !== undefined || step === 1) {
+      const text = (Array.isArray(human?.content) ? human.content : [])
+        .filter(part => part?.type === 'text' && typeof part.text === 'string')
+        .map(part => part.text).join('\n')
+      drawingRequests.set(agent, explicitlyRequestsDrawing(text))
+    }
+    if (step !== 1) return decision
     const sessionId = agent?.id
     if (typeof sessionId !== 'string' || sessionId === '') return decision
     let selection
@@ -217,7 +243,7 @@ export function apply(ctx) {
       ...decision,
       messages: [...decision.messages, context],
     }
-  }, { prepend: true })
+  }, { prepend: true, global: true })
 
   ctx.inject(['webServer', 'connection'], routeCtx => {
     routeCtx.effect(() => routeCtx.webServer.register({

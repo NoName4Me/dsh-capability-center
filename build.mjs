@@ -20,6 +20,28 @@ const python = process.env.CAPABILITY_CENTER_BUILD_PYTHON || 'python3'
 const { version } = JSON.parse(await readFile(join(root, 'src', 'engine', 'manifest.json'), 'utf8'))
 const offlineArchive = join(root, 'capability-center-offline.zip')
 
+async function configuredFeedbackEmail() {
+  let value = String(process.env.CAPABILITY_CENTER_FEEDBACK_EMAIL ?? '').trim()
+  if (value === '') {
+    try {
+      const env = await readFile(join(root, '.env'), 'utf8')
+      for (const line of env.split(/\r?\n/u)) {
+        const match = /^\s*CAPABILITY_CENTER_FEEDBACK_EMAIL\s*=\s*(.*)\s*$/u.exec(line)
+        if (match === null) continue
+        value = match[1].replace(/^(['"])(.*)\1$/u, '$2').trim()
+        break
+      }
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error
+    }
+  }
+  if (value === '') return undefined
+  if (value.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(value)) {
+    throw new Error('CAPABILITY_CENTER_FEEDBACK_EMAIL 不是有效邮箱地址。')
+  }
+  return value
+}
+
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: root,
@@ -138,6 +160,7 @@ await cp(join(root, 'src', 'engine', 'lib'), join(coreBuild, 'engine', 'lib'), {
 for (const file of ['index.html', 'styles.css']) {
   await cp(join(root, 'src', 'engine', 'page', file), join(coreBuild, 'page', file))
 }
+await cp(join(root, 'src', 'bootstrap', 'icon.svg'), join(coreBuild, 'page', 'icon.svg'))
 run(process.execPath, [
   join(root, 'node_modules', 'typescript', 'bin', 'tsc'),
   '--project', join(root, 'tsconfig.json'),
@@ -149,6 +172,14 @@ await makeZip(coreBuild, coreZip)
 const bootstrapPack = join(work, 'bootstrap')
 await cp(join(root, 'src', 'bootstrap'), bootstrapPack, { recursive: true })
 await cp(coreBuild, join(bootstrapPack, 'engine-seed'), { recursive: true })
+const feedbackEmail = await configuredFeedbackEmail()
+if (feedbackEmail !== undefined) {
+  await writeFile(
+    join(bootstrapPack, 'feedback-config.json'),
+    `${JSON.stringify({ feedbackEmail }, null, 2)}\n`,
+    'utf8',
+  )
+}
 const packedBootstrap = JSON.parse(run('npm', ['pack', '--json', '--pack-destination', packages], {
   cwd: bootstrapPack,
 }))[0]
@@ -167,6 +198,31 @@ const packedAutoContinue = JSON.parse(run('npm', ['pack', '--json', '--pack-dest
 if (typeof packedAutoContinue?.filename !== 'string') {
   throw new Error('Auto-continue npm pack returned no filename')
 }
+
+const ocrBuild = join(work, 'ocr-plugin-build')
+await cp(join(root, 'src', 'capabilities', 'capability-center-ocr'), ocrBuild, { recursive: true })
+const ocrManifest = JSON.parse(await readFile(join(ocrBuild, 'package.json'), 'utf8'))
+const ocrProvenancePath = join(root, 'vendor', 'dsh-ocr-runtime-1.0.0-provenance.json')
+const ocrProvenance = JSON.parse(await readFile(ocrProvenancePath, 'utf8'))
+const ocrRuntime = await readFile(join(root, 'vendor', 'dsh-ocr-runtime-1.0.0.tgz'))
+if (createHash('sha256').update(ocrRuntime).digest('hex') !== ocrProvenance.sha256) {
+  throw new Error('OCR runtime hash mismatch')
+}
+for (const [path, bytes] of tarFiles(ocrRuntime)) {
+  const parts = path.split('/')
+  if (parts[0] !== 'package' || !['node_modules', 'tessdata'].includes(parts[1])) continue
+  if (parts.some(part => !part || part === '.' || part === '..' || /[:\\]/u.test(part))) {
+    throw new Error(`Invalid OCR runtime path: ${path}`)
+  }
+  const target = join(ocrBuild, ...parts.slice(1))
+  await mkdir(dirname(target), { recursive: true })
+  await writeFile(target, bytes)
+}
+await cp(ocrProvenancePath, join(ocrBuild, 'runtime-provenance.json'))
+const [packedOcr] = JSON.parse(run('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', packages], {
+  cwd: ocrBuild,
+}))
+if (typeof packedOcr?.filename !== 'string') throw new Error('OCR npm pack returned no filename')
 
 const drawioPluginBuild = join(work, 'drawio-plugin-build')
 await cp(
@@ -284,6 +340,7 @@ await cp(
 const artifacts = {
   bootstrap: await artifact(join(packages, packedBootstrap.filename)),
   autoContinue: await artifact(join(packages, packedAutoContinue.filename)),
+  ocr: await artifact(join(packages, packedOcr.filename)),
   drawio: await artifact(join(packages, packedDrawio.filename)),
   genui: await artifact(join(packages, packedGenui.filename)),
   officeSkill: await artifact(officeSkillZip),
@@ -318,7 +375,7 @@ const catalog = {
       usage: {
         steps: [
           '点击“安装”后，DSH 会启用插件。',
-          '如果状态显示“等待重启”，请重启 DSH。',
+          '如果状态显示“刷新生效”，请刷新页面；只有宿主明确要求重启时才重启 DSH。',
           '在 DSH“插件 → 自动续跑”中调整次数或查看记录。',
         ],
         inputs: '安装后新产生的人类输入与 DSH 回合事件。',
@@ -366,6 +423,25 @@ const catalog = {
       },
     },
     {
+      id: ocrManifest.name,
+      type: 'plugin',
+      name: '离线文字识别',
+      version: ocrManifest.version,
+      description: '在本机 CPU 上识别图片和扫描 PDF 的简体中文及英文印刷文字。',
+      compatibility: { os: ['win32', 'darwin'], arch: ['x64', 'arm64'], dsh: '0.2.1-rc.2' },
+      artifact: artifacts.ocr,
+      dependencies: [],
+      install: { packageName: ocrManifest.name },
+      checks: [{ type: 'plugin-bundle' }, { type: 'named-tool-readonly-call', tool: 'offline_ocr_check' }],
+      usage: {
+        steps: ['安装后在 DSH 对话中选择或提供本地文件，让模型使用 offline-ocr 技能。', '扫描 PDF 使用宿主的 Office 渲染技能逐页处理，可指定页码。'],
+        inputs: 'PNG、JPEG 或宿主可渲染的 PDF 页面，支持简体中文和英文印刷文字。',
+        output: 'UTF-8 纯文本，或含页码、词级坐标和 OCR 置信度的 JSON。',
+        example: '请用离线文字识别读取这张截图，并把识别结果存为 UTF-8 文本。',
+      },
+      trial: { prompt: '请用 offline-ocr 技能识别我指定的本地图片。如果我还没提供文件，请先提示我添加一张 PNG 或 JPEG。' },
+    },
+    {
       id: 'dsh-genui',
       type: 'plugin',
       name: 'GenUI 交互式回复',
@@ -382,7 +458,7 @@ const catalog = {
       checks: [{ type: 'plugin-bundle' }],
       usage: {
         steps: [
-          '从能力中心安装。若提示等待重启，请重启 DSH。使用网页版时重新加载页面。',
+          '从能力中心安装。若提示“刷新生效”，请刷新页面；只有宿主明确要求重启时才重启 DSH。',
           '在新对话中让模型用 GenUI 展示表格、图表或表单。',
           '图表可用会话中的数据本地渲染。内网试用请使用本地媒体，地图默认没有街道底图。',
         ],

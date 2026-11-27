@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import mimetypes
 import os
 import posixpath
@@ -201,8 +202,31 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def find_bootstrap() -> Path | None:
-    candidates = sorted(PACKAGES.glob("capability-center-*.tgz"))
-    return candidates[-1] if candidates else None
+    try:
+        manifest = json.loads((ROOT / "artifact-manifest.json").read_text(encoding="utf-8"))
+        relative = manifest["artifacts"]["bootstrap"]["path"]
+    except (KeyError, OSError, TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(relative, str):
+        return None
+    prefix = f"{PACKAGES.name}/"
+    if not relative.startswith(prefix):
+        return None
+    name = relative[len(prefix):]
+    if (
+        not name.startswith("capability-center-")
+        or not name.endswith(".tgz")
+        or "/" in name
+        or name != Path(name).name
+    ):
+        return None
+    candidate = PACKAGES / name
+    try:
+        resolved = candidate.resolve(strict=True)
+        resolved.relative_to(PACKAGES.resolve(strict=True))
+    except (OSError, ValueError):
+        return None
+    return candidate if resolved.is_file() and not resolved.is_symlink() else None
 
 
 def advertised_host(bind_host: str) -> str:

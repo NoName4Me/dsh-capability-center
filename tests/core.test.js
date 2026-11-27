@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
+import { Writable } from 'node:stream'
 import {
   access,
   mkdir,
@@ -46,11 +47,34 @@ function engineSource(version, mode = 'ok') {
   if (mode === 'exit') {
     return `process.exit(37)\n`
   }
+  if (mode === 'boot-attempt-fail') {
+    return `import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
+
+export async function apply(ctx, config) {
+  const state = JSON.parse(await readFile(
+    join(process.env.DSH_HOME, 'capability-center', 'engine-state.json'),
+    'utf8',
+  ))
+  if (state.bootAttempt?.version !== config.runtime.version) {
+    throw new Error('hot candidate started before bootAttempt was persisted')
+  }
+  throw new Error('candidate failed after bootAttempt check')
+}
+`
+  }
   return `export async function apply(ctx, config) {
   if (${JSON.stringify(mode)} === 'fail') throw new Error('candidate failed')
   config.runtime.setEngine({
     version: config.runtime.version,
     async handle() { return false },
+    verify() {
+      return ${JSON.stringify(mode)} === 'verify-fail'
+        ? { ready: false, version: config.runtime.version }
+        : { ready: true, version: config.runtime.version }
+    },
+    stopAcceptingWork() {},
+    async drain() {},
     async dispose() {},
   })
   ctx.effect(() => () => undefined, 'fixture engine')
@@ -92,7 +116,7 @@ async function makeCoreZip(path, version, mode = 'ok') {
   return await readFile(path)
 }
 
-function supervisorContext() {
+function supervisorContext({ syncDispose = false } = {}) {
   const disposed = []
   const ctx = {
     disposed,
@@ -106,17 +130,25 @@ function supervisorContext() {
         disposers.push(disposer)
         return disposer
       }
+      const dispose = async () => {
+        for (const disposer of disposers.reverse()) await disposer?.()
+        disposers = []
+        disposedFlag = true
+        disposed.push(config.runtime.version)
+      }
       const fiber = {
         async await() {
           await plugin.apply(child, config)
           return fiber
         },
-        async dispose() {
-          for (const disposer of disposers.reverse()) await disposer?.()
-          disposers = []
-          disposedFlag = true
-          disposed.push(config.runtime.version)
-        },
+        dispose: syncDispose
+          ? () => {
+              for (const disposer of disposers.reverse()) disposer?.()
+              disposers = []
+              disposedFlag = true
+              disposed.push(config.runtime.version)
+            }
+          : dispose,
         get disposed() {
           return disposedFlag
         },
@@ -132,6 +164,52 @@ async function seedPackageRoot(temp) {
   await writeCoreDirectory(join(packageRoot, 'engine-seed'), '0.2.0')
   return packageRoot
 }
+
+test('manual host restart is restricted to local requests on a host with native restart support', async () => {
+  const temp = await tempRoot('capability-center-host-restart-')
+  try {
+    await withHome(join(temp, 'home'), async () => {
+      const context = supervisorContext()
+      const supervisor = new EngineSupervisor(context, { packageRoot: await seedPackageRoot(temp) })
+      try {
+        await supervisor.ready
+        const route = '/api/host/restart'
+        const request = async (remoteAddress, confirm = true) => {
+          const response = new Writable({ write(_chunk, _encoding, done) { done() } })
+          response.setHeader = () => {}
+          const handled = await supervisor.handle({
+            method: 'POST',
+            socket: { remoteAddress },
+            headers: { 'content-type': 'application/json' },
+            async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify({ confirm })) },
+          }, response, route, new URL(route, 'http://localhost'))
+          assert.equal(handled, true)
+          return response.statusCode
+        }
+        assert.equal(await request('127.0.0.1'), 501)
+        let restarted
+        const called = new Promise(resolve => { restarted = resolve })
+        context.get = key => key === 'desktopActions' ? { requestRestart: restarted } : undefined
+        assert.equal(await request('192.0.2.1'), 403)
+        assert.equal(await request('127.0.0.1', false), 400)
+        supervisor.engine.hasPendingActions = () => true
+        assert.equal(await request('127.0.0.1'), 409)
+        supervisor.engine.hasPendingActions = () => false
+        assert.equal(await request('127.0.0.1'), 202)
+        const timeout = setTimeout(() => restarted('timed out'), 1500)
+        try {
+          assert.equal(await called, undefined)
+        } finally {
+          clearTimeout(timeout)
+        }
+      } finally {
+        await supervisor.dispose()
+      }
+    })
+  } finally {
+    await rm(temp, { recursive: true, force: true })
+  }
+})
 
 function releaseIndex(releases) {
   return {
@@ -271,6 +349,169 @@ test('core staging writes its marker before commit and refuses immutable version
   }
 })
 
+test('hot core activation drains, verifies and atomically replaces the running core', async () => {
+  const temp = await tempRoot('capability-center-core-hot-activate-')
+  const home = join(temp, 'home')
+  const packageRoot = await seedPackageRoot(temp)
+  const candidateBytes = await makeCoreZip(join(temp, 'candidate.zip'), '0.2.1')
+  const server = await startFileServer(new Map([
+    ['/core-release-index.json', Buffer.from(JSON.stringify(
+      releaseIndex([{ version: '0.2.1', bytes: candidateBytes }]),
+    ))],
+    ['/core/capability-center-core-0.2.1.zip', candidateBytes],
+  ]))
+  try {
+    await withHome(home, async () => {
+      const context = supervisorContext()
+      const supervisor = new EngineSupervisor(context, { packageRoot })
+      await supervisor.ready
+      await supervisor.stage(server.base)
+      const activated = await supervisor.activatePending()
+      assert.equal(activated.activated, true)
+      assert.equal(activated.activeVersion, '0.2.1')
+      assert.equal(supervisor.engine.version, '0.2.1')
+      assert.deepEqual(context.disposed, ['0.2.0'])
+      const state = await supervisor.state()
+      assert.equal(state.current.version, '0.2.1')
+      assert.equal(state.previous.version, '0.2.0')
+      assert.equal(state.pending, null)
+      assert.equal(state.bootAttempt, null)
+      await supervisor.dispose()
+      assert.deepEqual(context.disposed, ['0.2.0', '0.2.1'])
+    })
+  } finally {
+    await server.close()
+    await rm(temp, { recursive: true, force: true })
+  }
+})
+
+test('hot activation persists bootAttempt, tolerates sync dispose, isolates failure and rolls back', async () => {
+  const temp = await tempRoot('capability-center-core-hot-rollback-')
+  const home = join(temp, 'home')
+  const packageRoot = await seedPackageRoot(temp)
+  const candidateBytes = await makeCoreZip(
+    join(temp, 'candidate.zip'),
+    '0.2.1',
+    'boot-attempt-fail',
+  )
+  const server = await startFileServer(new Map([
+    ['/core-release-index.json', Buffer.from(JSON.stringify(
+      releaseIndex([{ version: '0.2.1', bytes: candidateBytes }]),
+    ))],
+    ['/core/capability-center-core-0.2.1.zip', candidateBytes],
+  ]))
+  try {
+    await withHome(home, async () => {
+      const context = supervisorContext({ syncDispose: true })
+      const supervisor = new EngineSupervisor(context, { packageRoot })
+      await supervisor.ready
+      await supervisor.stage(server.base)
+      await assert.rejects(
+        supervisor.activatePending(),
+        error => error?.code === 'core-activation-failed'
+          && error.rolledBack === true
+          && /bootAttempt/u.test(error.message),
+      )
+      assert.equal(supervisor.engine.version, '0.2.0')
+      assert.deepEqual(context.disposed, ['0.2.0', '0.2.1'])
+      const state = await supervisor.state()
+      assert.equal(state.current.version, '0.2.0')
+      assert.equal(state.pending, null)
+      assert.equal(state.bootAttempt, null)
+      assert.equal(state.lastFailure.version, '0.2.1')
+      await assert.rejects(
+        access(join(home, 'capability-center', 'releases', '0.2.1')),
+        error => error.code === 'ENOENT',
+      )
+      await supervisor.dispose()
+      assert.deepEqual(context.disposed, ['0.2.0', '0.2.1', '0.2.0'])
+    })
+  } finally {
+    await server.close()
+    await rm(temp, { recursive: true, force: true })
+  }
+})
+
+test('hot activation rejects a stale window version before touching the running core', async () => {
+  const temp = await tempRoot('capability-center-core-hot-conflict-')
+  const home = join(temp, 'home')
+  const packageRoot = await seedPackageRoot(temp)
+  const first = await makeCoreZip(join(temp, 'first.zip'), '0.2.1')
+  const second = await makeCoreZip(join(temp, 'second.zip'), '0.2.2')
+  const server = await startFileServer(new Map([
+    ['/core/capability-center-core-0.2.1.zip', first],
+    ['/core/capability-center-core-0.2.2.zip', second],
+  ]))
+  try {
+    await withHome(home, async () => {
+      server.routes.set('/core-release-index.json', Buffer.from(JSON.stringify(
+        releaseIndex([{ version: '0.2.1', bytes: first }]),
+      )))
+      const context = supervisorContext()
+      const supervisor = new EngineSupervisor(context, { packageRoot })
+      await supervisor.ready
+      await supervisor.stage(server.base)
+      server.routes.set('/core-release-index.json', Buffer.from(JSON.stringify(
+        releaseIndex([{ version: '0.2.2', bytes: second }]),
+      )))
+      await supervisor.stage(server.base)
+
+      await assert.rejects(
+        supervisor.activatePending('0.2.1'),
+        error => error?.code === 'pending-core-changed'
+          && error.status === 409
+          && error.pendingVersion === '0.2.2',
+      )
+      assert.equal(supervisor.engine.version, '0.2.0')
+      assert.deepEqual(context.disposed, [])
+      assert.equal((await supervisor.state()).pending.version, '0.2.2')
+      await supervisor.dispose()
+    })
+  } finally {
+    await server.close()
+    await rm(temp, { recursive: true, force: true })
+  }
+})
+
+test('bootAttempt write failure leaves the current core untouched', async () => {
+  const temp = await tempRoot('capability-center-core-boot-write-failure-')
+  const home = join(temp, 'home')
+  const packageRoot = await seedPackageRoot(temp)
+  const candidateBytes = await makeCoreZip(join(temp, 'candidate.zip'), '0.2.1')
+  const server = await startFileServer(new Map([
+    ['/core-release-index.json', Buffer.from(JSON.stringify(
+      releaseIndex([{ version: '0.2.1', bytes: candidateBytes }]),
+    ))],
+    ['/core/capability-center-core-0.2.1.zip', candidateBytes],
+  ]))
+  try {
+    await withHome(home, async () => {
+      const context = supervisorContext()
+      const supervisor = new EngineSupervisor(context, { packageRoot })
+      await supervisor.ready
+      await supervisor.stage(server.base)
+      const writeState = supervisor.writeState.bind(supervisor)
+      supervisor.writeState = async state => {
+        if (state.bootAttempt?.mode === 'hot-activation') {
+          throw new Error('injected bootAttempt write failure')
+        }
+        return await writeState(state)
+      }
+      await assert.rejects(
+        supervisor.activatePending('0.2.1'),
+        /injected bootAttempt write failure/u,
+      )
+      assert.equal(supervisor.engine.version, '0.2.0')
+      assert.deepEqual(context.disposed, [])
+      assert.equal((await supervisor.state()).pending.version, '0.2.1')
+      await supervisor.dispose()
+    })
+  } finally {
+    await server.close()
+    await rm(temp, { recursive: true, force: true })
+  }
+})
+
 test('dev seed activation reads the bundled seed instead of a stale same-version release cache', async () => {
   const temp = await tempRoot('capability-center-core-dev-seed-')
   const home = join(temp, 'home')
@@ -292,6 +533,78 @@ test('dev seed activation reads the bundled seed instead of a stale same-version
       assert.equal(status.current.version, '0.2.0')
       assert.equal(status.current.source, 'dev-seed')
       assert.equal(supervisor.engine.version, '0.2.0')
+      await supervisor.dispose()
+    })
+  } finally {
+    await rm(temp, { recursive: true, force: true })
+  }
+})
+
+test('dev seed automatically promotes a newer bundled core from its activation root', async () => {
+  const temp = await tempRoot('capability-center-core-dev-seed-promote-')
+  const home = join(temp, 'home')
+  const packageRoot = await seedPackageRoot(temp)
+  await writeCoreDirectory(
+    join(home, 'capability-center', 'releases', '0.1.9'),
+    '0.1.9',
+  )
+  await mkdir(join(home, 'capability-center'), { recursive: true })
+  await writeFile(join(home, 'capability-center', 'engine-state.json'), JSON.stringify({
+    schemaVersion: 1,
+    current: { version: '0.1.9', source: 'http://127.0.0.1/core.zip' },
+    previous: null,
+    pending: null,
+    bootAttempt: null,
+    lastFailure: null,
+    updatedAt: new Date().toISOString(),
+  }))
+  try {
+    await withHome(home, async () => {
+      const supervisor = new EngineSupervisor(supervisorContext(), {
+        packageRoot,
+        devSeed: true,
+      })
+      const status = await supervisor.ready
+      assert.equal(status.ready, true)
+      assert.equal(status.current.version, '0.2.0')
+      assert.equal(status.current.source, 'dev-seed')
+      assert.equal(status.previous.version, '0.1.9')
+      assert.equal(supervisor.engine.version, '0.2.0')
+      await supervisor.dispose()
+    })
+  } finally {
+    await rm(temp, { recursive: true, force: true })
+  }
+})
+
+test('an isolated bundled seed version is not automatically promoted again', async () => {
+  const temp = await tempRoot('capability-center-core-dev-seed-isolated-')
+  const home = join(temp, 'home')
+  const packageRoot = await seedPackageRoot(temp)
+  await writeCoreDirectory(
+    join(home, 'capability-center', 'releases', '0.1.9'),
+    '0.1.9',
+  )
+  await mkdir(join(home, 'capability-center'), { recursive: true })
+  await writeFile(join(home, 'capability-center', 'engine-state.json'), JSON.stringify({
+    schemaVersion: 1,
+    current: { version: '0.1.9', source: 'http://127.0.0.1/core.zip' },
+    previous: null,
+    pending: null,
+    bootAttempt: null,
+    lastFailure: { version: '0.2.0', message: 'seed failed', at: new Date().toISOString() },
+    updatedAt: new Date().toISOString(),
+  }))
+  try {
+    await withHome(home, async () => {
+      const supervisor = new EngineSupervisor(supervisorContext(), {
+        packageRoot,
+        devSeed: true,
+      })
+      const status = await supervisor.ready
+      assert.equal(status.ready, true)
+      assert.equal(status.current.version, '0.1.9')
+      assert.equal(supervisor.engine.version, '0.1.9')
       await supervisor.dispose()
     })
   } finally {
@@ -353,7 +666,7 @@ test('development distribution URL is loopback-only and the page meta appears on
 
   const temp = await tempRoot('capability-center-dev-meta-')
   const home = join(temp, 'home')
-  const files = readZip(await readFile(join(dist, 'core', 'capability-center-core-0.2.7.zip')))
+  const files = readZip(await readFile(join(dist, 'core', 'capability-center-core-0.2.12.zip')))
   const coreRoot = join(temp, 'release')
   for (const [name, bytes] of files) {
     const target = join(coreRoot, ...name.split('/'))
@@ -365,7 +678,7 @@ test('development distribution URL is loopback-only and the page meta appears on
   )
   const page = async devDistributionUrl => {
     const service = new BuiltCoreService(fakeContext(), {
-      version: '0.2.7',
+      version: '0.2.12',
       dataRoot: join(home, 'capability-center'),
       http: { readBoundedUrl },
       devDistributionUrl,
@@ -479,7 +792,7 @@ test('actual built core ZIP serves its UI from the release-root page directory',
   const temp = await tempRoot('capability-center-built-core-page-')
   const home = join(temp, 'home')
   try {
-    const files = readZip(await readFile(join(dist, 'core', 'capability-center-core-0.2.7.zip')))
+    const files = readZip(await readFile(join(dist, 'core', 'capability-center-core-0.2.12.zip')))
     assert.equal([...files.keys()].some(name => name.endsWith('.ts')), false)
     const coreRoot = join(temp, 'release')
     for (const [name, bytes] of files) {
@@ -512,7 +825,7 @@ test('actual built core ZIP serves its UI from the release-root page directory',
     await withHome(home, async () => {
       await module.apply(ctx, {
         runtime: {
-          version: '0.2.7',
+          version: '0.2.12',
           dataRoot: join(home, 'capability-center'),
           http: { readBoundedUrl },
           setEngine(value) { engine = value },
@@ -521,7 +834,7 @@ test('actual built core ZIP serves its UI from the release-root page directory',
       for (const [route, expected] of [
         ['/', /<h1>能力中心<\/h1>/u],
         ['/app.js', /capability-center\/api\/status/u],
-        ['/styles.css', /--blue:\s*#4d6bfe/u],
+        ['/styles.css', /--blue:\s*#4059dc/u],
       ]) {
         const chunks = []
         const headers = new Map()

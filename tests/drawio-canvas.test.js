@@ -630,7 +630,7 @@ test('canvas layout collapses only an expanded global sidebar and restores its o
 })
 
 test('built plugin contains deterministic same-origin editor assets, licenses, and provenance', async () => {
-  const archive = join(dist, 'packages', 'capability-center-drawio-0.1.7.tgz')
+  const archive = join(dist, 'packages', 'capability-center-drawio-0.1.8.tgz')
   const bytes = await readFile(archive)
   assert.ok(bytes.byteLength < 32 * 1024 * 1024)
   const catalog = JSON.parse(await readFile(join(dist, 'catalog.json'), 'utf8'))
@@ -684,7 +684,7 @@ test('the built plugin serves the editor with same-origin MIME, CSP, and travers
   const home = join(temp, 'home')
   const extracted = join(temp, 'package')
   await mkdir(extracted, { recursive: true })
-  const archive = join(dist, 'packages', 'capability-center-drawio-0.1.7.tgz')
+  const archive = join(dist, 'packages', 'capability-center-drawio-0.1.8.tgz')
   await runFile('tar', ['-xzf', archive, '-C', extracted])
   const oldHome = process.env.DSH_HOME
   process.env.DSH_HOME = home
@@ -760,10 +760,23 @@ test('the built plugin serves the editor with same-origin MIME, CSP, and travers
     assert.equal(mutation.status, 403)
 
     const create = toolDefinitions.find(definition => definition.name === 'drawio_create')
+    const agent = { id: 'session-context' }
+    const step = (text, turn, kind = 'user') => preStepListener({
+      agent, turn, step: 1, signal: new AbortController().signal,
+      messages: [{ role: 'user', source: { kind }, content: [{ type: 'text', text }] }],
+    }, async () => ({ kind: 'enter', messages: [] }))
+    const args = { title: 'OAuth', nodes: [{ id: 'alpha', label: 'Alpha', x: 0, y: 0 }] }
+    await step('oauth授权登陆是什么流程', 1)
+    await assert.rejects(create.execute(args, { agent }), { code: 'drawing-not-requested' })
+    await step('请画一张 OAuth 授权登录流程图', 2)
     const created = await create.execute({
       title: 'Context',
       nodes: [{ id: 'alpha', label: 'Alpha', x: 0, y: 0 }],
-    }, { agent: { id: 'session-context' } })
+    }, { agent })
+    await step('不用画图，只解释 OAuth 的流程', 3)
+    await assert.rejects(create.execute(args, { agent }), { code: 'drawing-not-requested' })
+    await step('请画一张 OAuth 授权登录流程图', 4, 'capability-center-drawio')
+    await assert.rejects(create.execute(args, { agent }), { code: 'drawing-not-requested' })
     const selection = await requestStatic(
       handler,
       `/capability-center-drawio/api/drawio/boards/${created.boardId}/selection`,

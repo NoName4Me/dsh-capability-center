@@ -1,0 +1,13 @@
+{
+  "name": "capability-center-ocr",
+  "version": "0.1.0",
+  "description": "Offline Chinese and English image OCR for DSH",
+  "type": "module",
+  "main": "plugin.js",
+  "files": ["plugin.js", "ocr.js", "worker.js", "cli.js", "SKILL.md", "cordis.patch.yml", "fixture.png", "tessdata", "runtime-provenance.json"],
+  "engines": { "dsh": ">=0.2.1-rc.2 <0.2.3", "node": ">=22" },
+  "dependencies": { "tesseract.js": "7.0.0", "image-size": "2.0.2" },
+  "bundleDependencies": ["tesseract.js", "image-size"],
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "license": "MIT"
+}

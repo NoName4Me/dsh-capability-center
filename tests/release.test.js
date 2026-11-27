@@ -39,6 +39,25 @@ function httpGet(url, method = 'GET') {
   })
 }
 
+test('packaged OCR recognizes the bilingual fixture using its local runtime', async () => {
+  const temp = await tempRoot('capability-center-ocr-')
+  try {
+    await runFile(python, [
+      '-m', 'tarfile', '-e', join(dist, 'packages', 'capability-center-ocr-0.1.0.tgz'), temp,
+    ])
+    const bundle = join(temp, 'package')
+    const { stdout } = await runFile(process.execPath, [
+      join(bundle, 'cli.js'), join(bundle, 'fixture.png'),
+    ], { cwd: temp, timeout: 20_000 })
+    const result = JSON.parse(stdout)
+    assert.match(result.text.replace(/\s+/gu, ''), /离线文字识别OCR2026Invoice12345/u)
+    assert.equal(result.page, 1)
+    assert.ok(result.words.some(word => word.text === 'Invoice' && word.width > 0 && word.confidence >= 0))
+  } finally {
+    await rm(temp, { recursive: true, force: true })
+  }
+})
+
 test('offline archive is complete, contains current release metadata, and landing URL is substituted', async () => {
   const archive = readZip(
     await readFile(join(root, 'capability-center-offline.zip')),
@@ -54,13 +73,14 @@ test('offline archive is complete, contains current release metadata, and landin
     'capability-center/index.html',
     'capability-center/start-server.py',
     'capability-center/start-server.cmd',
-    'capability-center/packages/capability-center-0.2.7.tgz',
-    'capability-center/packages/capability-center-drawio-0.1.7.tgz',
+    'capability-center/packages/capability-center-0.2.12.tgz',
+    'capability-center/packages/capability-center-drawio-0.1.8.tgz',
+    'capability-center/packages/capability-center-ocr-0.1.0.tgz',
     'capability-center/packages/changfenhuang-dsh-genui-0.16.0.tgz',
     'capability-center/packages/dsh-intranet-auto-continue-1.1.0.tgz',
     'capability-center/packages/office-enhancement-skill-1.0.0.zip',
     'capability-center/packages/pypdf-7.1.0-py3-none-any.whl',
-    'capability-center/core/capability-center-core-0.2.7.zip',
+    'capability-center/core/capability-center-core-0.2.12.zip',
   ]) {
     assert.ok(names.includes(required), `offline archive is missing ${required}`)
   }
@@ -69,16 +89,20 @@ test('offline archive is complete, contains current release metadata, and landin
   assert.equal(names.some(name => /report-format|dsh-local-sysinfo|tabulate/u.test(name)), false)
   const catalog = JSON.parse(archive.get('capability-center/catalog.json').toString('utf8'))
   assert.deepEqual(catalog.items.map(item => item.id).sort(), [
-    'capability-center-drawio', 'dsh-genui', 'dsh-intranet-auto-continue',
+    'capability-center-drawio', 'capability-center-ocr', 'dsh-genui', 'dsh-intranet-auto-continue',
     'office-enhancement', 'office-enhancement-skill', 'python-pypdf',
   ])
   const landing = archive.get('capability-center/index.html').toString('utf8')
   assert.doesNotMatch(landing, /\{\{BOOTSTRAP_URL\}\}/u)
-  assert.match(landing, /capability-center-0\.2\.7\.tgz/u)
+  assert.match(landing, /capability-center-0\.2\.12\.tgz/u)
+  const manifest = JSON.parse(
+    archive.get('capability-center/artifact-manifest.json').toString('utf8'),
+  )
+  assert.equal(manifest.artifacts.bootstrap.path, 'packages/capability-center-0.2.12.tgz')
   const registry = JSON.parse(archive.get('capability-center/publication-registry.json').toString('utf8'))
-  assert.equal(registry.entries['core@0.2.7'].kind, 'core')
+  assert.equal(registry.entries['core@0.2.12'].kind, 'core')
   assert.equal(registry.entries['dsh-intranet-auto-continue@1.1.0'].type, 'plugin')
-  assert.equal(registry.entries['capability-center-drawio@0.1.7'].type, 'plugin')
+  assert.equal(registry.entries['capability-center-drawio@0.1.8'].type, 'plugin')
   assert.equal(registry.entries['dsh-genui@0.16.0'].type, 'plugin')
   assert.equal(registry.entries['office-enhancement@1.0.0'].type, 'composite')
   assert.equal(registry.entries['python-pypdf@7.1.0'].type, 'python')
@@ -207,7 +231,11 @@ test('read-only distribution server serves built assets, HEAD, immutable paths, 
     const catalog = await httpGet(`${base}catalog.json`)
     assert.equal(catalog.status, 200)
     assert.match(catalog.headers['content-type'], /application\/json/u)
-    const head = await httpGet(`${base}packages/capability-center-0.2.7.tgz`, 'HEAD')
+    const initial = /Initial plugin URL: (http:\/\/127\.0\.0\.1:\d+\/packages\/capability-center-0\.2\.12\.tgz)/u
+      .exec(stdout)
+    assert.ok(initial, `server did not advertise the stable bootstrap:\n${stdout}`)
+    assert.doesNotMatch(stdout, /Initial plugin URL: .*capability-center-drawio/u)
+    const head = await httpGet(initial[1], 'HEAD')
     assert.equal(head.status, 200)
     assert.ok(Number(head.headers['content-length']) > 10_000)
     assert.match(head.headers['cache-control'], /immutable/u)

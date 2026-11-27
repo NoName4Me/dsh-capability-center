@@ -1,6 +1,6 @@
 {
   "name": "capability-center-drawio",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Same-origin draw.io canvas with native chat, session-bound diagram tools, and offline assets",
   "type": "module",
   "main": "plugin.js",
