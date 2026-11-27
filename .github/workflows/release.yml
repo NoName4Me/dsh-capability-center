@@ -1,10 +1,10 @@
-name: 打包并发布离线 ZIP
+name: 构建管理台上传包
 
 on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: offline-release
@@ -34,23 +34,11 @@ jobs:
           export CAPABILITY_CENTER_TEST_PYTHON="$CAPABILITY_CENTER_BUILD_PYTHON"
           npm ci
           npm test
-          sha256sum capability-center-offline.zip > capability-center-offline.zip.sha256
-      - name: 发布到 GitHub Releases
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          version="$(node -p 'require("./package.json").version')"
-          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::package.json 中的版本需要是 x.y.z"
-            exit 1
-          fi
-          tag="v$version"
-          existing_tag="$(git ls-remote --tags "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" "refs/tags/$tag")"
-          if [[ -n "$existing_tag" ]]; then
-            echo "::error::标签 $tag 已存在，请提升版本后再发布"
-            exit 1
-          fi
-          gh release create "$tag" \
-            capability-center-offline.zip capability-center-offline.zip.sha256 \
-            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "能力中心 $tag" --generate-notes
+          for target in center auto-continue offline-ocr drawio office-enhancement genui; do npm run pack:target -- "$target"; done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: admin-upload-packages
+          path: |
+            dist-independent/**/*.upload.zip
+            dist-independent/center/packages/capability-center-*.tgz
+          if-no-files-found: error

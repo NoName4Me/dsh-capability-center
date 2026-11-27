@@ -6,13 +6,6 @@ export const ID = /^[a-z0-9][a-z0-9-]{0,63}$/u
 export const SHA256 = /^[a-f0-9]{64}$/u
 export const sha256 = bytes => createHash('sha256').update(bytes).digest('hex')
 
-export function registryUrl(value) {
-  const url = new URL(value)
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('无效私服地址')
-  url.pathname = url.pathname.replace(/\/*$/, '/')
-  return url
-}
-
 export function canonical(value) {
   if (Array.isArray(value)) return '[' + value.map(canonical).join(',') + ']'
   if (value !== null && typeof value === 'object') return '{' + Object.keys(value).sort().map(k => JSON.stringify(k)+':'+canonical(value[k])).join(',') + '}'
@@ -33,7 +26,7 @@ export function verifyCatalog(value, publicKey) {
 
 export function pluginDescriptor(manifest, overlay = {}) {
   if (!PACKAGE_NAME.test(manifest.name ?? '') || !VERSION.test(manifest.version ?? '') ||
-      typeof manifest.dsh?.bundle?.patch !== 'string' || !manifest.dsh.bundle.patch ||
+      !(typeof manifest.dsh?.bundle?.patch === 'string' && manifest.dsh.bundle.patch || Array.isArray(manifest.dsh?.bundle?.patch) && manifest.dsh.bundle.patch.length && manifest.dsh.bundle.patch.every(p=>typeof p==='string'&&p)) ||
       typeof manifest.engines?.dsh !== 'string') throw new Error('不是有效的 DSH Bundle')
   const meta = {...manifest.capability, ...overlay}
   const id = meta.id ?? manifest.name.split('/').at(-1)

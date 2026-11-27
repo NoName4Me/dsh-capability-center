@@ -681,7 +681,7 @@ export class CoreService {
 
   pluginInstallOptions(enabled) {
     // Do not resolve missing dependencies against any network registry.
-    return {saveExact:true,offline:true,registry:'http://127.0.0.1:9/',...(enabled===undefined?{}:{enabled})}
+    return {saveExact:true,registry:'http://127.0.0.1:9/',...(enabled===undefined?{}:{enabled})}
   }
 
   mergedCatalog(online) {
@@ -1241,7 +1241,7 @@ export class CoreService {
       if (failures.length > 0) {
         throw new CapabilityError('postinstall-check-failed', `安装后检查失败：${failures.join('；')}`)
       }
-      if (this.ledger.get(rootId)?.type === 'composite') {
+      if (this.ledger.get(rootId)?.type === 'composite' && !restartRequired) {
         this.ledger.get(rootId).latestHealth = { status: 'ready', detail: '组合依赖已安装并通过检查' }
       }
       for (const entry of this.ledger.list()) entry.lastOperation = `${action}:${operation.id}`

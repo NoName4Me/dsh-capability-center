@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash, randomUUID, randomBytes } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import {
   closeSync,
@@ -38,7 +38,7 @@ function usage() {
     'Options:',
     '  --no-open                 Start DSH Web without opening a browser',
     '  --web-port <port>         DSH Web port (default: 4174; 0 selects one)',
-    '  --distribution-port <n>   Distribution port (default: 0)',
+    '  --distribution-port <n>   Admin/distribution port (default: 8780)',
     '  --dsh <path>              DSH CLI path override',
     '  -h, --help                Show this help',
   ].join('\n')
@@ -57,7 +57,7 @@ function parseArgs(argv) {
   const options = {
     noOpen: false,
     webPort: 4174,
-    distributionPort: 0,
+    distributionPort: 8780,
     dsh: process.env.CAPABILITY_CENTER_DSH_BIN,
   }
   for (let index = 0; index < argv.length; index += 1) {
@@ -186,7 +186,7 @@ export function releaseLock(path = lockPath, pid = process.pid) {
 
 async function snapshotDistribution() {
   const staging = join(devRoot, `.distribution-${randomUUID()}`)
-  await cp(join(root, 'dist'), staging, { recursive: true, errorOnExist: true })
+  await cp(join(root, 'dist-independent', 'center'), staging, { recursive: true, errorOnExist: true })
   await rm(distributionRoot, { recursive: true, force: true })
   await rename(staging, distributionRoot)
   return distributionRoot
@@ -344,7 +344,7 @@ async function main() {
       console.warn(`已清理上次异常退出留下的开发锁（PID ${recoveredPid}）。`)
     }
     await mkdir(home, { recursive: true })
-    await runChild(process.execPath, [join(root, 'build.mjs')])
+    await runChild(process.execPath, [join(root, 'build.mjs'), '--target', 'center'])
     if (shuttingDown) return
     const snapshotRoot = await snapshotDistribution()
     if (shuttingDown) return
@@ -355,21 +355,16 @@ async function main() {
     const bootstrapPath = await contentAddressedBootstrap(bootstrapVersion, snapshotRoot)
     if (shuttingDown) return
 
-    const python = process.env.CAPABILITY_CENTER_BUILD_PYTHON || 'python3'
-    const distribution = spawnTracked(python, [
-      '-s',
-      'start-server.py',
-      '--host',
-      '127.0.0.1',
-      '--port',
-      String(options.distributionPort),
-    ], {
-      cwd: snapshotRoot,
-      env: { ...baseEnv, PYTHONUNBUFFERED: '1' },
-      stdio: ['ignore', 'pipe', 'pipe'],
+    const adminToken=process.env.DSH_ADMIN_TOKEN??randomBytes(32).toString('hex')
+    delete baseEnv.DSH_ADMIN_TOKEN
+    const configured=process.env.DSH_CATALOG_URL
+    const distribution = configured ? null : spawnTracked(process.execPath, [join(root,'apps','admin','server.js')], {
+      env:{...baseEnv,DSH_ADMIN_TOKEN:adminToken,DSH_ADMIN_HOST:'127.0.0.1',DSH_ADMIN_PORT:String(options.distributionPort),DSH_ADMIN_DATA:join(devRoot,'admin-data'),DSH_ALLOW_UNSIGNED_CATALOG:'1'},
+      stdio:['ignore','pipe','pipe'],
     })
+    if(distribution) console.log('本地管理台令牌（仅开发）：'+adminToken)
     let distributionOutput = ''
-    const distributionReady = new Promise((resolveReady, reject) => {
+    const distributionReady = configured ? Promise.resolve(new URL(configured).href) : new Promise((resolveReady, reject) => {
       let settled = false
       const fail = error => {
         if (settled) return
@@ -406,7 +401,7 @@ async function main() {
     })
     const distributionUrl = await distributionReady
     if (shuttingDown) return
-    const distributionFailure = distribution.exit.then(result => {
+    const distributionFailure = distribution ? distribution.exit.then(result => {
       if (!shuttingDown) {
         return Promise.reject(new Error(
           `分发服务意外退出（${result.signal ?? result.code}）：\n${distributionOutput}`,
@@ -414,8 +409,10 @@ async function main() {
       }
       return new Promise(() => {})
     })
+    : new Promise(()=>{})
     void distributionFailure.catch(() => undefined)
-    baseEnv.CAPABILITY_CENTER_DEV_DISTRIBUTION_URL = distributionUrl
+    baseEnv.DSH_CATALOG_URL = distributionUrl
+    if(distribution)baseEnv.CAPABILITY_CENTER_DEV_DISTRIBUTION_URL = distributionUrl
 
     console.log(`Installing ${bootstrapPath}`)
     await Promise.race([

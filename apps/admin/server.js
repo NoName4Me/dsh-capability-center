@@ -20,6 +20,7 @@ async function readJson(req){
 export function createAdmin({store,token}){
   if(typeof token!=='string'||token.length<24)throw new Error('DSH_ADMIN_TOKEN 至少 24 字符')
   const authorized=req=>timingSafeEqual(hash(String(req.headers.authorization??'')),hash('Bearer '+token))
+  let uploadInProgress=false
   return createServer(async(req,res)=>{
     const path=new URL(req.url,'http://local.invalid').pathname
     try{
@@ -53,9 +54,13 @@ export function createAdmin({store,token}){
         if(!['application/zip','application/octet-stream'].includes(req.headers['content-type']))throw new Error('请上传 ZIP 文件')
         const declared=Number(req.headers['content-length'])
         if(Number.isFinite(declared)&&declared>MAX_UPLOAD_BYTES){json(res,413,{error:'ZIP 超过 128 MiB'});return}
+        if(uploadInProgress){json(res,429,{error:'另一个能力包正在上传'});return}
+        uploadInProgress=true
+        try{
         let size=0;const chunks=[]
         for await(const chunk of req){size+=chunk.length;if(size>MAX_UPLOAD_BYTES)throw Error('ZIP 超过 128 MiB');chunks.push(chunk)}
         json(res,201,store.stage(readCapabilityUpload(Buffer.concat(chunks,size))));return
+        }finally{uploadInProgress=false}
       }
       if(req.method==='POST'&&path==='/api/admin/change'){
         const body=await readJson(req);json(res,200,store.change(body.id,body.version,body.action));return
@@ -70,5 +75,5 @@ if(process.argv[1]===fileURLToPath(import.meta.url)){
   if(!privateKey&&process.env.DSH_ALLOW_UNSIGNED_CATALOG!=='1')throw new Error('配置目录签名密钥，或仅在联调时显式允许未签名目录')
   const store=new Store(process.env.DSH_ADMIN_DATA??'./.admin-data',{privateKey})
   const server=createAdmin({store,token:process.env.DSH_ADMIN_TOKEN})
-  server.listen(Number(process.env.DSH_ADMIN_PORT??8780),process.env.DSH_ADMIN_HOST??'127.0.0.1',()=>console.log('能力发布后台已启动'))
+  server.listen(Number(process.env.DSH_ADMIN_PORT??8780),process.env.DSH_ADMIN_HOST??'127.0.0.1',()=>console.log('Distribution URL: http://'+(process.env.DSH_ADMIN_HOST??'127.0.0.1')+':'+server.address().port+'/'))
 }

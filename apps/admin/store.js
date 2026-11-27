@@ -12,7 +12,7 @@ export class Store {
     mkdirSync(join(root,'packages'),{recursive:true})
     mkdirSync(join(root,'uploads'),{recursive:true})
     this.db=new DatabaseSync(join(root,'catalog.sqlite'))
-    this.db.exec("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS versions(id TEXT, version TEXT, item TEXT NOT NULL, state TEXT NOT NULL, created TEXT NOT NULL, first_published TEXT, published TEXT, PRIMARY KEY(id,version)); CREATE TABLE IF NOT EXISTS audit(seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, action TEXT NOT NULL, id TEXT NOT NULL, version TEXT NOT NULL); CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value INTEGER NOT NULL); INSERT OR IGNORE INTO meta VALUES('revision',0);")
+    this.db.exec("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS versions(id TEXT, version TEXT, item TEXT NOT NULL, state TEXT NOT NULL, created TEXT NOT NULL, first_published TEXT, published TEXT, PRIMARY KEY(id,version)); CREATE TABLE IF NOT EXISTS audit(seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, action TEXT NOT NULL, id TEXT NOT NULL, version TEXT NOT NULL); CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value INTEGER NOT NULL); INSERT OR IGNORE INTO meta VALUES('revision',0); CREATE TABLE IF NOT EXISTS upload_receipts(id TEXT NOT NULL, version TEXT NOT NULL, sha256 TEXT NOT NULL, bytes INTEGER NOT NULL, PRIMARY KEY(id,version));")
   }
   close(){this.db.close()}
   transaction(fn){
@@ -43,6 +43,7 @@ export class Store {
       const all=this.db.prepare('SELECT item FROM versions WHERE id<>?').all(item.id)
       if(item.type==='plugin'&&all.some(row=>JSON.parse(row.item).install?.packageName===item.install.packageName))throw new Error('npm 包已绑定其他能力')
       this.db.prepare('INSERT INTO versions VALUES(?,?,?,?,?,NULL,NULL)').run(item.id,item.version,JSON.stringify(item),'draft',new Date().toISOString())
+      if(upload)this.db.prepare('INSERT INTO upload_receipts VALUES(?,?,?,?)').run(item.id,item.version,sha256(upload),upload.length)
       this.audit('stage',item.id,item.version)
       return {id:item.id,version:item.version,state:'draft'}
     })
@@ -67,7 +68,7 @@ export class Store {
       return {id,version,state}
     })
   }
-  list(){return this.db.prepare('SELECT * FROM versions ORDER BY created DESC').all().map(row=>({...row,item:JSON.parse(row.item)}))}
+  list(){return this.db.prepare('SELECT versions.*,upload_receipts.sha256 AS upload_sha256,upload_receipts.bytes AS upload_bytes FROM versions LEFT JOIN upload_receipts USING(id,version) ORDER BY created DESC').all().map(row=>({...row,item:JSON.parse(row.item)}))}
   auditList(){return this.db.prepare('SELECT * FROM audit ORDER BY seq DESC LIMIT 200').all()}
   catalog(){
     const rows=this.db.prepare("SELECT * FROM versions WHERE state='published'").all()

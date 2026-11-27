@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { generateKeyPairSync } from 'node:crypto'
-import { signedCatalog, verifyCatalog, pluginDescriptor, registryUrl } from './index.js'
+import { signedCatalog, verifyCatalog, pluginDescriptor } from './index.js'
 test('签名验证与篡改拒绝',()=>{
   const {privateKey,publicKey}=generateKeyPairSync('ed25519')
   const value={schemaVersion:2,revision:1,items:[]}
@@ -15,5 +15,5 @@ test('Bundle 继承 npm 身份并拒绝未实现组件',()=>{
   assert.throws(()=>pluginDescriptor(p,{version:'2.0.0'}))
   assert.throws(()=>pluginDescriptor(p,{components:[{}]}))
   assert.deepEqual(pluginDescriptor(p,{python:{requirements:[]}}).runtime.python,{requirements:[]})
-  assert.throws(()=>registryUrl('https://a:b@example.com'))
+  assert.equal(pluginDescriptor({...p,dsh:{bundle:{patch:['./cordis.patch.yml']}}}).id,'sample')
 })

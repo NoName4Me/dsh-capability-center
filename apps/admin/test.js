@@ -14,7 +14,7 @@ const usage={steps:['安装','使用'],inputs:'输入',output:'输出',example:'
 const desc=(id,version='1.0.0')=>({id,type:'skill',name:id,version,description:'测试技能',usage,trial:{prompt:'试用'},checks:[{type:'skill-discovery',name:id}],dependencies:[]})
 const ref=(path,body)=>({path,sha256:sha256(body),bytes:body.length})
 function fixture(id,version='1.0.0'){
- const body=zipFiles(new Map([[id+'/SKILL.md',Buffer.from('---\nname: '+id+'\ndescription: 测试\n---\n正文')]]))
+ const body=zipFiles(new Map([[id+'/SKILL.md',Buffer.from('---\nname: '+id+'\ndescription: 测试\n---\n正文 '+version)]]))
  const item={...desc(id,version),artifact:ref('payload/skill.zip',body)}
  return {body,item,upload:makeCapabilityZip(item,new Map([[item.artifact.path,body]]))}
 }
