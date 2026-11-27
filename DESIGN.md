@@ -1,5 +1,7 @@
 # 技术设计
 
+> 本文记录现行 0.2.12 离线实现，作为迁移基线。私服版的后续设计以[目标架构](docs/architecture/target-design.md)为准，验收及迁移见[私服联调](docs/development/registry-integration.md)和[迁移计划](docs/development/migration-plan.md)。下文的同源固定制品、直接 wheel 安装和全量离线构建是现状，不是目标约束。
+
 ## 目标与兼容边界
 
 当前能力中心核心版本是 `0.2.12`。这里的 `0.2.12` 是能力中心发布版本，不是 DSH 宿主版本。核心协议继续以 DSH `0.2.1-rc.2` 作为内部兼容标记，稳定引导的 `engines.dsh` 则声明为 `>=0.2.1-rc.2 <0.2.3`，覆盖文档中的 Win7、Win10 和已实测 macOS Web 基线。稳定引导包名为 `capability-center`，可替换核心包名为 `capability-center-core`。产品不访问公共 npm、GitHub、pip 或模型；所有运行制品和依赖闭包由内网只读服务提供。

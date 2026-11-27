@@ -1,5 +1,7 @@
 # DSH 能力中心 0.2.12
 
+> 正在规划私服版与 monorepo 迁移。本文仍为当前 0.2.12 的安装使用说明；下一阶段见[目标架构](docs/architecture/target-design.md)、[私服联调](docs/development/registry-integration.md)、[迁移计划](docs/development/migration-plan.md)。
+
 面向内网 DSH `0.2.1-rc.2` 至 `0.2.2-rc.2` 的能力分发中心。它管理技能、DSH 插件、真实注册的 MCP 能力和能力包，不要求账号、凭据或模型调用。隐藏依赖中的纯 Python wheel 仍由本机账本管理，但不再作为顶部目录分类。安装只使用目录声明的本地制品、固定版本和 SHA-256。
 
 当前能力中心版本为 `0.2.12`。核心协议继续使用 `0.2.1-rc.2` 作为兼容标记；实际宿主版本门禁由引导插件和各个插件包的 `engines.dsh` 执行，覆盖文档中的 Win7 `0.2.1-rc.5`、Win10 `0.2.1-rc.2` 以及已验证的 macOS Web `0.2.2-rc.3` 基线。

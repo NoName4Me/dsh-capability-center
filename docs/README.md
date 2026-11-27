@@ -5,6 +5,12 @@
 - [架构与兼容设计](../DESIGN.md)
 - [Office 增强技能使用说明](../src/capabilities/office-enhancement/SKILL.md)
 
+## 下一阶段（目标设计，尚未落地）
+
+- [私服版目标架构与 monorepo](architecture/target-design.md)
+- [内网私服部署接口及联调矩阵](development/registry-integration.md)
+- [分阶段实施与迁移计划](development/migration-plan.md)
+
 ## 技术调研
 
 - [内网两版 DSH 内置能力清单](research/dsh-builtin-capabilities.md)
