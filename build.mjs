@@ -236,9 +236,9 @@ for (const [path, bytes] of tarFiles(ocrRuntime)) {
   if (parts.some(part => !part || part === '.' || part === '..' || /[:\\]/u.test(part))) {
     throw new Error(`Invalid OCR runtime path: ${path}`)
   }
-  const target = join(ocrBuild, ...parts.slice(1))
-  await mkdir(dirname(target), { recursive: true })
-  await writeFile(target, bytes)
+  const destination = join(ocrBuild, ...parts.slice(1))
+  await mkdir(dirname(destination), { recursive: true })
+  await writeFile(destination, bytes)
 }
 await cp(ocrProvenancePath, join(ocrBuild, 'runtime-provenance.json'))
 const [packedOcr] = JSON.parse(run('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', packages], {
