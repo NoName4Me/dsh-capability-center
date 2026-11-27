@@ -55,7 +55,7 @@ ZIP 根目录必须有 capability.json，结构为 {"schemaVersion":1,"item":{..
 独立能力还需要 artifact：path、bytes、sha256。plugin 增加 install.packageName 及 plugin-bundle 检查；skill 增加 skill-discovery 检查。所有能力都有固定 ID、SemVer、说明、使用方式和试用提示。兼容条件可声明 dsh、os、arch、python。构建工具根据真实字节填充摘要与大小。
 
 ### npm
-运行依赖使用真实 npm bundleDependencies，把完整传递闭包随 TGZ 打包，不允许 Git/URL/file 依赖或依赖安装脚本。可选平台依赖、宿主提供的 @deepseek-ai peer 仍需目标机验证；不要将宿主自身依赖重复打包。终端使用本地 TGZ，并显式指定不可用的 loopback registry；rc.2 源码表明未知 registry 不进入配置的默认 fallback 列表，但实际 DSH/pnpm 行为、作用域配置、锁文件及断公网需真实验收。构建阶段允许在受控开发环境准备依赖，终端不能联网补齐。
+运行依赖使用真实 npm bundleDependencies，把完整传递闭包随 TGZ 打包，不允许 Git/URL/file 依赖或依赖安装脚本。可选平台依赖、宿主提供的 @deepseek-ai peer 仍需目标机验证；不要将宿主自身依赖重复打包。终端使用本地 TGZ，并显式指定不可用的 loopback registry；rc.2 源码表明未知 registry 不进入配置的默认 fallback 列表，但实际 DSH/pnpm 行为、作用域配置、锁文件及断公网需真实验收。构建阶段允许在受控开发环境准备依赖，终端不能联网补齐。OCR 使用已准备好的固定上游运行文件；构建时移除捆绑依赖的安装钩子，不执行钩子，也不修改原 vendor 制品，实际识别回归用于验证运行文件可用。
 
 ### Python
 runtime.python.requirements 是固定 name/version/hashes 数组，runtime.assets 必须包含名为 wheelhouse、format 为 zip 的资源；ZIP 根目录存放所有锁定 wheel。禁止 sdist、网络依赖及任意安装命令；终端用 DSH Python 创建独立 venv，pip --no-index --find-links --require-hashes --no-deps 安装，随后执行 pip check。所有额外依赖闭包都要放入 wheelhouse；明确声明 inheritBuiltin 时可继承宿主内置库（Office 使用）。目标平台需有匹配 OS/架构/ABI wheel；不兼容时失败而不是在线补齐。资源也可以通过其他已声明 ZIP 或 BIN 随包交付。

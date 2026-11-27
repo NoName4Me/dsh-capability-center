@@ -237,7 +237,14 @@ for (const [path, bytes] of tarFiles(ocrRuntime)) {
   }
   const destination = join(ocrBuild, ...parts.slice(1))
   await mkdir(dirname(destination), { recursive: true })
-  await writeFile(destination, bytes)
+  // Bundled OCR runtime is already prepared. Never execute upstream install hooks on the terminal.
+  if (parts[1] === 'node_modules' && basename(destination) === 'package.json') {
+    const dependency=JSON.parse(bytes.toString('utf8'))
+    if (dependency.scripts) {
+      for (const hook of ['preinstall','install','postinstall']) delete dependency.scripts[hook]
+    }
+    await writeFile(destination, JSON.stringify(dependency,null,2)+'\n')
+  } else await writeFile(destination, bytes)
 }
 await cp(ocrProvenancePath, join(ocrBuild, 'runtime-provenance.json'))
 const [packedOcr] = JSON.parse(run('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', packages], {
