@@ -27,6 +27,7 @@
     trialAvailable?: boolean;
     trial?: { prompt?: string };
     delisted?: boolean;
+    revoked?: boolean;
     artifact?: { path: string; sha256: string };
     dependencies?: { id: string; version: string }[];
     usage?: { steps?: string[]; inputs?: string; output?: string; example?: string };
@@ -61,7 +62,17 @@
     feedbackEmail?: string | null;
   }
 
+  interface UpdateSummary {
+    unread?: string[];
+    revoked?: {id:string;version:string}[];
+    items?: Record<string,{latestVersion:string}>;
+    core?: {updateAvailable:boolean; latestVersion:string|null; activeVersion:string; pendingVersion:string|null};
+    stale?:boolean;
+    lastSyncedAt?:number|null;
+  }
+
   interface StatusPayload {
+    updates?: UpdateSummary;
     catalog?: { name: string; items: Capability[] };
     localStates?: Record<string, LocalState>;
     online?: boolean;
@@ -182,6 +193,7 @@
   const state = {
     catalog: [] as Capability[],
     localStates: {} as Record<string, LocalState>,
+    updates: {} as UpdateSummary,
     online: false,
     localOnly: localStorage.getItem(OFFLINE_STORAGE_KEY) === 'true',
     preview: false,
@@ -241,6 +253,7 @@
     previewNotice: requiredElement('preview-notice', HTMLElement),
     refreshNotice: requiredElement('refresh-notice', HTMLElement),
     recoveryNotice: requiredElement('recovery-notice', HTMLElement),
+    updateNotice: requiredElement('update-notice', HTMLElement),
   };
 
   const HOST_TOKENS = [
@@ -366,6 +379,8 @@
     state.preview = payload.preview === true;
     state.catalog = Array.isArray(payload.catalog?.items) ? payload.catalog.items : [];
     state.localStates = payload.localStates || {};
+    state.updates = payload.updates || {};
+    if (state.updates.core?.updateAvailable && !state.coreBusy) state.coreCheck = {updateAvailable:true,currentVersion:state.updates.core.activeVersion,latestVersion:state.updates.core.latestVersion};
     state.online = payload.online === true;
     state.onlineError = payload.onlineError || null;
     state.error = null;
@@ -475,6 +490,7 @@
 
   function statusFor(item: Capability): ItemStatus {
     const local = localState(item);
+    if (item.revoked) return {kind:'warning', label:'安全撤回',detail:'已安装版本被撤回，请更新到安全版本或卸载。'};
     if (!local.installed) {
       if (item.delisted) return { kind: 'warning', label: '已下架', detail: '本机仍保留安装记录，可检查或卸载。' };
       return { kind: 'idle', label: '未安装', detail: local.detail || '本机账本未记录。' };
@@ -496,8 +512,10 @@
       if (item.hidden === true) return false;
       const local = localState(item);
       if (state.filter === 'installed' && !local.installed) return false;
+      if (state.filter === 'new' && !state.updates.unread?.includes(item.id)) return false;
+      if (state.filter === 'updates' && !state.updates.items?.[item.id] && !item.revoked) return false;
       if (state.filter === 'mcp' && item.category !== 'mcp') return false;
-      if (!['all', 'installed', 'mcp'].includes(state.filter) && item.type !== state.filter) return false;
+      if (!['all', 'installed', 'mcp', 'new', 'updates'].includes(state.filter) && item.type !== state.filter) return false;
       if (!state.query) return true;
       const haystack = `${item.name} ${item.description} ${item.id} ${item.version}`.toLocaleLowerCase('zh-CN');
       return haystack.includes(state.query.toLocaleLowerCase('zh-CN'));
@@ -657,6 +675,7 @@
       el('strong', { className: 'capability-name' }, item.name),
       el('span', { className: 'version' }, `v${localState(item).currentVersion || item.version}`),
     );
+    if (state.updates.unread?.includes(item.id)) title.append(el('span',{className:'new-mark'},'新上架'));
     card.append(title, el('span', { className: 'capability-description' }, item.description));
     const footer = el('div', { className: 'card-footer' });
     const operation = state.operations.get(item.id);
@@ -1040,7 +1059,25 @@
     setDraftAttempt(pending.itemId, { status: 'error', message: `会话未打开：${error}` });
   }
 
+  async function markNewRead() {
+    if (!activeServerUrl()) return;
+    try {
+      state.updates=await requestJson<UpdateSummary>('/capability-center/api/updates/read',{method:'POST',headers:{'content-type':'application/json','x-capability-center':'1'},body:JSON.stringify({serverUrl:activeServerUrl(),ids:state.updates.unread??[]})});
+      if(state.filter==='new'){state.filter='all';for(const b of elements.filters.querySelectorAll<HTMLButtonElement>('[data-filter]')) b.setAttribute('aria-pressed',String(b.dataset.filter==='all'));}
+      renderStatusMessages();render();notifyHostOfUpdateState();
+    }catch(error){state.error=error instanceof Error?error.message:String(error);renderStatusMessages();}
+  }
+
   function renderStatusMessages() {
+    const unread=state.updates.unread?.length??0;
+    const updates=Object.keys(state.updates.items??{}).length;
+    const revoked=state.updates.revoked?.length??0;
+    elements.updateNotice.hidden=!(unread||updates||revoked||state.updates.stale);
+    if(!elements.updateNotice.hidden){
+      elements.updateNotice.replaceChildren(el('strong',{},revoked?'有能力版本被安全撤回':'能力中心动态'),el('span',{},[unread?`${unread} 项新能力`:'',updates?`${updates} 项能力可更新`:'',revoked?`${revoked} 项已安装版本被撤回`:'',state.updates.stale?'同步失败，显示上次确认状态':''].filter(Boolean).join(' · ')));
+      if(unread)elements.updateNotice.append(el('button',{className:'button button-quiet',type:'button',onclick:()=>{elements.filters.querySelector<HTMLButtonElement>('[data-filter="new"]')?.click();}},'查看新能力'),el('button',{className:'button button-quiet',type:'button',onclick:markNewRead},'全部已读'));
+      if(updates||revoked)elements.updateNotice.append(el('button',{className:'button button-quiet',type:'button',onclick:()=>{elements.filters.querySelector<HTMLButtonElement>('[data-filter="updates"]')?.click();}},'查看待处理'));
+    }
     elements.previewNotice.hidden = !state.preview;
     elements.refreshNotice.hidden = state.refreshNotice === null;
     if (state.refreshNotice !== null) {
@@ -1416,5 +1453,7 @@
   elements.serverUrl.value = state.serverUrl;
   void consumeRefreshNotice();
   setLoading(false);
-  void Promise.all([loadRuntimeConfig(), loadCoreStatus(), load(state.serverUrl)]);
+  void Promise.all([loadRuntimeConfig(), loadCoreStatus(), load(activeServerUrl())]);
+  const noticeTimer=window.setInterval(()=>{if(!state.loading&&activeServerUrl()&&!state.operations.size)void load(activeServerUrl(),{background:true});},15*60_000);
+  window.addEventListener('pagehide',()=>window.clearInterval(noticeTimer),{once:true});
 })();

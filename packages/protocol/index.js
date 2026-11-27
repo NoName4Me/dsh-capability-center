@@ -45,7 +45,7 @@ export function pluginDescriptor(manifest, overlay = {}) {
   if (meta.python || meta.assets?.length || meta.components?.length || meta.dependencies?.length) throw new Error('该能力需要尚未支持的额外组件')
   const usage = meta.usage ?? {steps:['安装并确认能力已激活。','按插件说明在 DSH 中使用。'],inputs:'按插件说明提供输入。',output:'由能力提供。',example:'查看插件说明。'}
   return {id, type:'plugin', name, version:manifest.version, description, compatibility:{dsh:manifest.engines.dsh,...(meta.os ? {os:meta.os}:{}),...(meta.arch ? {arch:meta.arch}:{})},
-    install:{packageName:manifest.name}, checks:[{type:'plugin-bundle'}], dependencies:[], usage,
+    install:{packageName:manifest.name,registryRequired:true}, checks:[{type:'plugin-bundle'}], dependencies:[], usage,
     trial:{prompt:meta.trial?.prompt ?? '请介绍已安装能力 '+name+' 的使用方法。'},
     ...(meta.category==='mcp'?{category:'mcp'}:{}),
     ...(typeof meta.changelog==='string'?{changelog:meta.changelog.slice(0,4000)}:{})}

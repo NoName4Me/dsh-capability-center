@@ -269,7 +269,7 @@ window.__ModuleLoader__.load({
             if (controller.signal.aborted || bridgeDisposed) return;
             updateBadge.set(payload?.attention === true);
           } catch {
-            if (!controller.signal.aborted && !bridgeDisposed) updateBadge.set(false);
+            // A transport failure is not evidence that a previously confirmed update disappeared.
           }
         }
 
@@ -455,7 +455,7 @@ window.__ModuleLoader__.load({
           scheduleUpdateCheck(0);
           checkInterval = setInterval(() => {
             void checkForUpdates();
-          }, UPDATE_CHECK_INTERVAL_MS);
+          }, UPDATE_CHECK_INTERVAL_MS + Math.floor(Math.random() * 60_000));
           return () => {
             bridgeDisposed = true;
             checkController?.abort();

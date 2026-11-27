@@ -19,6 +19,7 @@ import {
   sha256,
 } from './fs-safe.js'
 import { readBoundedUrl } from './http-transport.js'
+import { assertTrustedSource, trustedPayload } from './signature.js'
 import { compareVersions, parseVersion, satisfies } from './semver.js'
 
 export const CORE_PROTOCOL_VERSION = 1
@@ -126,14 +127,16 @@ function validateReleaseIndex(index) {
 }
 
 async function loadReleaseIndex(serverUrl) {
-  const url = new URL('core-release-index.json', normalizeServerUrl(serverUrl))
+  const base=normalizeServerUrl(serverUrl)
+  assertTrustedSource(base)
+  const url = new URL('core-release-index.json', base)
   const response = await readBoundedUrl(url, {
     timeoutMs: 15_000,
     maxBytes: INDEX_MAX_BYTES,
     headers: { accept: 'application/json' },
   })
   try {
-    return validateReleaseIndex(JSON.parse(response.body.toString('utf8')))
+    return validateReleaseIndex(await trustedPayload(JSON.parse(response.body.toString('utf8'))))
   } catch (error) {
     if (error?.code === 'invalid-core-index') throw error
     throw Object.assign(new Error('核心版本索引不是有效 JSON。'), { code: 'invalid-core-index' })

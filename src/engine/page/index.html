@@ -46,6 +46,7 @@
     </section>
     <section class="notice" id="refresh-notice" hidden aria-live="polite"></section>
     <section class="notice" id="core-notice" hidden aria-live="polite"></section>
+    <section class="notice" id="update-notice" hidden aria-live="polite"></section>
     <section class="notice notice-warning" id="migration-notice" hidden>
       <strong>检测到旧版能力中心管理器</strong>
       <span>请先在 DSH“插件”中停用并移除 capability-center-demo 管理器一次；其安装的 3 项能力会保留并在本机账本中显示。新版核心以后不需要卸载。</span>
@@ -88,6 +89,8 @@
           <button type="button" class="filter" data-filter="mcp" aria-pressed="false">MCP</button>
           <button type="button" class="filter" data-filter="composite" aria-pressed="false">能力包</button>
           <button type="button" class="filter" data-filter="installed" aria-pressed="false">已安装</button>
+          <button type="button" class="filter" data-filter="new" aria-pressed="false">上新</button>
+          <button type="button" class="filter" data-filter="updates" aria-pressed="false">待处理</button>
         </div>
         <label class="search" for="search-input">
           <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.7" cy="8.7" r="5.2"/><path d="m12.7 12.7 3.7 3.7"/></svg>

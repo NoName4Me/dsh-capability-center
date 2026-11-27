@@ -1,5 +1,6 @@
 import { safeRelativePath } from './archive.js'
-import { satisfies } from './semver.js'
+import { satisfies, compareVersions, parseVersion } from './semver.js'
+import { assertTrustedSource, trustedPayload } from './signature.js'
 
 export const CATALOG_SCHEMA_VERSION = 2
 export const MAX_ITEMS = 100
@@ -82,7 +83,7 @@ function validateItem(item, index, base) {
     || typeof item.id !== 'string' || !ID.test(item.id)
     || !['skill', 'plugin', 'python', 'composite'].includes(item.type)
     || typeof item.name !== 'string' || item.name.length === 0 || item.name.length > 100
-    || typeof item.version !== 'string' || !VERSION.test(item.version)
+    || typeof item.version !== 'string' || !VERSION.test(item.version) || parseVersion(item.version) === null
     || typeof item.description !== 'string' || item.description.length === 0 || item.description.length > 1_200
     || !validCompatibility(item.compatibility)
     || !validUsage(item.usage)
@@ -125,7 +126,8 @@ function validateItem(item, index, base) {
   }
   if (item.type === 'plugin') {
     if (typeof item.install?.packageName !== 'string'
-      || !PACKAGE_NAME.test(item.install.packageName)) {
+      || !PACKAGE_NAME.test(item.install.packageName)
+      || (item.install.registryRequired !== undefined && typeof item.install.registryRequired !== 'boolean')) {
       throw new CapabilityError('invalid-catalog', `插件 ${item.id} 缺少固定 packageName。`)
     }
   }
@@ -168,14 +170,43 @@ export function validateCatalog(value, base) {
     || !Array.isArray(value.items) || value.items.length > MAX_ITEMS) {
     throw new CapabilityError('invalid-catalog', '能力目录版本或条目数量无效。')
   }
+  if (value.revision !== undefined && (!Number.isSafeInteger(value.revision) || value.revision < 0)) {
+    throw new CapabilityError('invalid-catalog', '目录修订号无效。')
+  }
   const ids = new Set()
-  const items = value.items.map((item, index) => {
+  let items = value.items.map((item, index) => {
     if (ids.has(item?.id)) throw new CapabilityError('invalid-catalog', `能力 ID 重复：${item.id}`)
     ids.add(item?.id)
     return validateItem(item, index, base)
   })
+  // New publisher includes all available versions; keep legacy directory semantics if absent.
+  if (value.versions !== undefined) {
+    if (!Array.isArray(value.versions) || value.versions.length > 1000) throw new CapabilityError('invalid-catalog','版本列表无效。')
+    const groups = new Map()
+    for (const [i, raw] of value.versions.entries()) {
+      const item = validateItem(raw, i, base)
+      if (!ids.has(item.id)) throw new CapabilityError('invalid-catalog','版本缺少目录条目。')
+      const list = groups.get(item.id) ?? []
+      if (list.some(v => v.version === item.version || v.install?.packageName !== item.install?.packageName)) throw new CapabilityError('invalid-catalog','版本身份重复或不一致。')
+      list.push(item); groups.set(item.id,list)
+    }
+    items = items.map(item => {
+      const list=groups.get(item.id)
+      if (!list?.some(v=>v.version===item.version)) throw new CapabilityError('invalid-catalog','目录版本缺失。')
+      const compatible=list.filter(v=>compatibilityError({...v,compatibility:{...v.compatibility,python:undefined}}, {dsh:process.env.DSH_HOST_VERSION || '0.2.1-rc.2'}) === undefined)
+      const stable=compatible.filter(v=>parseVersion(v.version).prerelease.length===0)
+      return (stable.length?stable:compatible).sort((a,b)=>compareVersions(b.version,a.version))[0] ?? item
+    })
+  }
+  const revocations=value.revocations ?? []
+  if (!Array.isArray(revocations) || revocations.length>1000 || !revocations.every(v=>v && ID.test(v.id) && VERSION.test(v.version))) {
+    throw new CapabilityError('invalid-catalog','撤回列表无效。')
+  }
+  if (items.some(item=>revocations.some(v=>v.id===item.id&&v.version===item.version))) throw new CapabilityError('invalid-catalog','撤回版本不能上架。')
   return Object.freeze({
     schemaVersion: CATALOG_SCHEMA_VERSION,
+    revision: value.revision,
+    revocations: Object.freeze(revocations.map(v=>Object.freeze({id:v.id,version:v.version}))),
     name: typeof value.name === 'string' ? value.name.slice(0, 120) : '内网能力目录',
     generatedFor: typeof value.generatedFor === 'string' ? value.generatedFor : 'dsh-v0.2.1-rc.2',
     items: Object.freeze(items),
@@ -184,6 +215,7 @@ export function validateCatalog(value, base) {
 
 export async function fetchCatalog(serverUrl, http) {
   const base = normalizeServerUrl(serverUrl)
+  assertTrustedSource(base)
   const response = await http.readBoundedUrl(new URL('catalog.json', base), {
     timeoutMs: 15_000,
     maxBytes: 1024 * 1024,
@@ -195,7 +227,7 @@ export async function fetchCatalog(serverUrl, http) {
   } catch {
     throw new CapabilityError('invalid-catalog', '能力目录不是有效 JSON。')
   }
-  return validateCatalog(value, base)
+  return validateCatalog(await trustedPayload(value), base)
 }
 
 export function itemById(catalog, itemId) {
@@ -205,7 +237,7 @@ export function itemById(catalog, itemId) {
 }
 
 export function compatibilityError(item, {
-  dsh = '0.2.1-rc.2',
+  dsh = process.env.DSH_HOST_VERSION || '0.2.1-rc.2',
   platform = process.platform,
   arch = process.arch,
   pythonVersion,

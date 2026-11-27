@@ -31,6 +31,7 @@ export async function requestBounded(urlValue, {
   timeoutMs = 60_000,
   signal,
   onData = () => undefined,
+  acceptNotModified = false,
 } = {}) {
   let url
   try {
@@ -109,6 +110,11 @@ export async function requestBounded(urlValue, {
       response = incoming
       if (settled) {
         incoming.destroy()
+        return
+      }
+      if (incoming.statusCode === 304 && acceptNotModified) {
+        incoming.resume()
+        finish(undefined, { status: 304, headers: incoming.headers, bytes: 0 })
         return
       }
       if (REDIRECT_STATUSES.has(incoming.statusCode)) {

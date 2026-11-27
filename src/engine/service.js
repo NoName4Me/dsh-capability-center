@@ -17,7 +17,6 @@ import { planCapabilities, validateGraph } from './lib/graph.js'
 import {
   CapabilityError,
   compatibilityError,
-  fetchCatalog,
   itemById,
   normalizeServerUrl,
   serializableItem,
@@ -25,6 +24,7 @@ import {
 } from './lib/manifest.js'
 import { compareVersions } from './lib/semver.js'
 import { LocalLedger } from './lib/ledger.js'
+import { CatalogSync } from './lib/catalog-sync.js'
 import {
   downloadArtifact,
   installPython,
@@ -263,6 +263,9 @@ export class CoreService {
     this.dataRoot = runtime.dataRoot
     this.home = runtime.dshHome ?? dshHome()
     this.ledger = new LocalLedger(this.dataRoot)
+    this.catalogSync = new CatalogSync(this.dataRoot, runtime.http)
+    this.coreUpdateCache = new Map()
+    this.syncTimer = undefined
     this.operations = new Map()
     this.queue = Promise.resolve()
     this.disposed = false
@@ -291,6 +294,8 @@ export class CoreService {
       await this.migrateLegacy()
       await this.syncAllSkills()
       await this.refreshRestartRequired()
+      await this.catalogSync.initialize().catch(() => undefined)
+      this.scheduleCatalogSync(0)
     } finally {
       this.initialized = true
     }
@@ -305,6 +310,7 @@ export class CoreService {
 
   stopAcceptingWork() {
     this.acceptingWork = false
+    clearTimeout(this.syncTimer)
   }
 
   async drain() {
@@ -427,7 +433,7 @@ export class CoreService {
       const current = await this.installedBundle(intent.packageName)
       if (current?.installed === true && current.version === intent.beforeVersion) return
       if (current?.installed === true) await this.removePluginForRecovery(intent.packageName)
-      const restored = await manager.installBundle(intent.beforeArchive, { saveExact: true })
+      const restored = await manager.installBundle(intent.beforeArchive, this.pluginInstallOptions(intent.registryRequired))
       if (!['applied', 'restart-required', 'overridden'].includes(restored?.application)) {
         throw new CapabilityError(
           'recovery-install-failed',
@@ -649,11 +655,32 @@ export class CoreService {
     await this.syncAllSkills()
   }
 
-  async catalog(serverUrl) {
-    if (serverUrl === undefined || serverUrl === null || String(serverUrl).trim() === '') {
-      return undefined
-    }
-    return await fetchCatalog(serverUrl, this.runtime.http)
+  scheduleCatalogSync(delay = 15 * 60_000 + Math.floor(Math.random() * 60_000)) {
+    clearTimeout(this.syncTimer)
+    if (!this.acceptingWork || !this.catalogSync.source) return
+    this.syncTimer = setTimeout(async () => {
+      try { await this.updateSummary(this.catalogSync.source, { force: false, configure: false }) }
+      catch { /* Retain last verified snapshot. */ }
+      finally { if (this.acceptingWork) this.scheduleCatalogSync() }
+    }, delay)
+    this.syncTimer.unref?.()
+  }
+
+  async configureCatalog(serverUrl) {
+    const before = this.catalogSync.source
+    await this.catalogSync.select(serverUrl)
+    if (before !== this.catalogSync.source) this.scheduleCatalogSync()
+  }
+
+  async catalog(serverUrl, {force=true}={}) {
+    if (serverUrl === undefined || serverUrl === null || String(serverUrl).trim() === '') return undefined
+    return await this.catalogSync.refresh(serverUrl,{force})
+  }
+
+  pluginInstallOptions(required, enabled) {
+    const value=process.env.DSH_NPM_REGISTRY
+    if(required && !value) throw new CapabilityError('registry-required','请配置内网 npm 私服 DSH_NPM_REGISTRY。')
+    return {saveExact:true,...(enabled===undefined?{}:{enabled}),...(value?{registry:normalizeServerUrl(value)}:{})}
   }
 
   mergedCatalog(online) {
@@ -672,6 +699,7 @@ export class CoreService {
   }
 
   async inspect(serverUrl) {
+    await this.configureCatalog(serverUrl)
     let online
     let onlineError
     try {
@@ -679,7 +707,9 @@ export class CoreService {
     } catch (error) {
       onlineError = messageOf(error)
     }
-    const catalog = this.mergedCatalog(online)
+    const snapshot=await this.catalogSync.snapshot(serverUrl)
+    const catalog = this.mergedCatalog(online ?? snapshot.catalog)
+    const summary=await this.updateSummary(serverUrl,{force:false,configure:false})
     const localStates = {}
     for (const item of catalog.items) {
       localStates[item.id] = await this.quickState(item, this.ledger.get(item.id))
@@ -688,6 +718,7 @@ export class CoreService {
       serverUrl: serverUrl ? normalizeServerUrl(serverUrl) : null,
       online: online !== undefined,
       onlineError,
+      updates: summary,
       recoveryRequired: this.recoveryRequired,
       recoveryMessages: this.recoveryMessages,
       legacyManagerEnabled: this.legacyManagerEnabled,
@@ -705,6 +736,7 @@ export class CoreService {
           // The existing auto-continue catalog prompt is guidance, not a trial.
           trialAvailable: item.id !== AUTO_CONTINUE_ID,
           delisted: online !== undefined && !online.items.some(candidate => candidate.id === item.id),
+          revoked: summary.revoked.some(candidate => candidate.id === item.id),
           artifact: item.artifact === undefined ? undefined : {
             path: item.artifact.path,
             sha256: item.artifact.sha256,
@@ -841,6 +873,7 @@ export class CoreService {
     this.transition(operation, 'running', '检查安装环境', { progress: 0.08 })
     const pythonRuntime = needsPython ? await this.workspaceDependencies() : undefined
     for (const [index, item] of plan.order.entries()) {
+      if (item.type === 'plugin') this.pluginInstallOptions(item.install?.registryRequired, true)
       const incompatibility = compatibilityError(item, { pythonVersion: pythonRuntime?.version })
       if (incompatibility !== undefined) {
         throw new CapabilityError('incompatible-capability', `${item.name} 不兼容：${incompatibility}`)
@@ -1178,6 +1211,7 @@ export class CoreService {
             beforeVersion: existing.version,
             targetVersion: item.version,
             beforeArchive: existing.artifacts[0],
+            registryRequired: existing.manifest.install?.registryRequired === true,
           })
           await this.ledger.addStep(operation.id, { step: 'plugin-remove-before-update', itemId: item.id })
           const removed = await manager.removeBundle(existing.manifest.install.packageName)
@@ -1381,7 +1415,7 @@ export class CoreService {
         targetVersion: item.version,
         beforeVersion: old?.version ?? null,
       })
-      const result = await manager.installBundle(artifact, { enabled: true, saveExact: true })
+      const result = await manager.installBundle(artifact, this.pluginInstallOptions(item.install.registryRequired, true))
       if (!['applied', 'restart-required', 'overridden'].includes(result?.application)) {
         throw new CapabilityError('plugin-install-failed',
           `插件安装失败：${result?.error?.diagnostic ?? result?.application ?? '无结果'}`)
@@ -2080,6 +2114,7 @@ export class CoreService {
         packageName: item.install.packageName,
         beforeVersion: entry.version,
         beforeArchive: entry.artifacts[0],
+        registryRequired: entry.manifest.install?.registryRequired === true,
       })
       const result = await manager.removeBundle(item.install.packageName)
       if (!['applied', 'restart-required'].includes(result?.application)) {
@@ -2199,7 +2234,8 @@ export class CoreService {
     }
   }
 
-  async updateSummary(serverUrl) {
+  async updateSummary(serverUrl, {force=true,configure=true}={}) {
+    if(configure) await this.configureCatalog(serverUrl)
     const localCore = typeof this.runtime.coreStatus === 'function'
       ? await this.runtime.coreStatus()
       : await this.coreStatus()
@@ -2211,24 +2247,32 @@ export class CoreService {
     }
     if (typeof serverUrl === 'string' && serverUrl.trim() !== ''
       && typeof this.runtime.coreCheck === 'function') {
-      try {
-        const checked = await this.runtime.coreCheck(serverUrl)
-        core.latestVersion = checked.latestVersion ?? null
-        core.updateAvailable = checked.updateAvailable === true
-      } catch {
-        // A failed remote check is not evidence that an update exists.
+      const source=normalizeServerUrl(serverUrl)
+      let cached=this.coreUpdateCache.get(source)
+      if(force || !cached || Date.now()-cached.at>15*60_000){
+        try{
+          cached={at:Date.now(),value:await this.runtime.coreCheck(source)}
+          this.coreUpdateCache.set(source,cached)
+        }catch{/* Retain last confirmed version. */}
+      }
+      if(cached){
+        core.latestVersion=cached.value.latestVersion??null
+        core.updateAvailable=core.latestVersion!==null && compareVersions(core.latestVersion,core.activeVersion)>0
       }
     }
 
     const items = {}
+    let snapshot={}
     if (typeof serverUrl === 'string' && serverUrl.trim() !== '') {
-      try {
-        const online = await this.catalog(serverUrl)
+      try { await this.catalog(serverUrl,{force}) } catch { /* Last-good snapshot remains. */ }
+      snapshot=await this.catalogSync.snapshot(serverUrl)
+      const online=snapshot.catalog
+      if(online){
         for (const entry of this.ledger.list()) {
           const candidate = online.items.find(item => item.id === entry.id)
           if (candidate === undefined) continue
           const local = localDisplayItem(entry)
-          if (candidate.hidden === true || local.hidden === true) continue
+          if (candidate.hidden === true || local.hidden === true || compatibilityError({...candidate,compatibility:{...candidate.compatibility,python:undefined}})) continue
           const updateAvailable = compareVersions(candidate.version, entry.version) > 0
           if (!updateAvailable) continue
           items[entry.id] = {
@@ -2238,18 +2282,16 @@ export class CoreService {
             updateAvailable: true,
           }
         }
-      } catch {
-        // Offline or malformed catalogs cannot produce a positive badge.
       }
     }
-
+    const unread=(snapshot.unread??[]).filter(id=>!this.ledger.get(id))
+    const revoked=(snapshot.catalog?.revocations??[]).filter(v=>this.ledger.get(v.id)?.version===v.version)
     return {
-      attention: core.pendingVersion !== null
-        || core.updateAvailable
-        || Object.keys(items).length > 0,
+      attention: core.pendingVersion !== null || core.updateAvailable || Object.keys(items).length > 0 || unread.length>0 || revoked.length>0,
       offline: !(typeof serverUrl === 'string' && serverUrl.trim() !== ''),
-      core,
-      items,
+      core, items, unread, revoked,
+      lastSyncedAt:snapshot.lastSyncedAt??null,
+      stale:snapshot.stale===true,
     }
   }
 
@@ -2335,7 +2377,15 @@ export class CoreService {
       }
       if (route === '/api/updates') {
         if (req.method !== 'GET') throw Object.assign(new Error('Method not allowed'), { status: 405 })
-        this.sendJson(res, 200, await this.updateSummary(url.searchParams.get('server') ?? ''))
+        this.sendJson(res, 200, await this.updateSummary(url.searchParams.get('server') ?? '', {force:false}))
+        return true
+      }
+      if (route === '/api/updates/read') {
+        if (req.method !== 'POST') throw Object.assign(new Error('Method not allowed'), { status: 405 })
+        const body=await this.bodyJson(req)
+        if(!Array.isArray(body.ids)||body.ids.length>100||!body.ids.every(id=>typeof id==='string'&&/^[a-z0-9][a-z0-9-]{0,63}$/.test(id))) throw new CapabilityError('invalid-ids','无效能力 ID。')
+        await this.catalogSync.markRead(body.serverUrl,body.ids)
+        this.sendJson(res,200,await this.updateSummary(body.serverUrl,{force:false,configure:false}))
         return true
       }
       if (route === '/api/refresh-state') {
