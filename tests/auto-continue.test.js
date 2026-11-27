@@ -788,7 +788,7 @@ test('catalog installs, activates, diagnoses and uninstalls the auto-continue pl
     await installing.initialize()
     const installed = await waitFor(installing, installing.startAction(server.base, AUTO_ID, 'install'))
     assert.equal(installed.status, 'restart-required', installed.error)
-    assert.deepEqual(installedOptions, { enabled: true, saveExact: true })
+    assert.deepEqual(installedOptions, { enabled: true, saveExact: true, registry: 'http://127.0.0.1:9/' })
     assert.equal(installing.ledger.get(AUTO_ID).version, AUTO_VERSION)
     assert.equal(installing.ledger.get(AUTO_ID).bundle.application, 'restart-required')
     const bundlesAfterRestart = new Map([...installContext.bundles].map(([name, bundle]) => [

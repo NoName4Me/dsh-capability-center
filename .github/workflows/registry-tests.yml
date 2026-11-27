@@ -33,6 +33,7 @@ jobs:
           npm test
           npm run test:packages
       - name: 验证独立构建
+        if: ${{ !cancelled() }}
         run: |
           npm run pack:target -- center
           npm run pack:target -- auto-continue

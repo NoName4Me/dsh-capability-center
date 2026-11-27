@@ -2,7 +2,7 @@ import { gunzipSync } from 'node:zlib'
 import { ID, VERSION, PACKAGE_NAME, sha256 } from '../protocol/index.js'
 import { validateCatalog, validateRuntime, serializableItem, MAX_ARTIFACT_BYTES } from '../../apps/dsh-plugin/core/lib/manifest.js'
 import { readZip, safeRelativePath } from '../../apps/dsh-plugin/core/lib/archive.js'
-import { parseVersion, satisfies } from '../../apps/dsh-plugin/core/lib/semver.js'
+import { parseVersion } from '../../apps/dsh-plugin/core/lib/semver.js'
 
 export const MAX_UPLOAD_BYTES=128*1024*1024
 const ZIP_LIMITS={maxFileBytes:MAX_ARTIFACT_BYTES,maxUnpackedBytes:192*1024*1024,maxFiles:1024}
@@ -31,7 +31,7 @@ function npmFiles(bytes){
 export function readNpmManifest(bytes){return json(npmFiles(bytes).get('package/package.json'))}
 export function validateBundle(bytes,item){
  const files=npmFiles(bytes),manifest=json(files.get('package/package.json'))
- if(manifest.name!==item.install?.packageName||manifest.version!==item.version||!PACKAGE_NAME.test(manifest.name)||!manifest.engines?.dsh)throw Error('Bundle 身份与能力声明不一致')
+ if(manifest.name!==item.install?.packageName||manifest.version!==item.version||!PACKAGE_NAME.test(manifest.name)||typeof manifest.engines?.dsh!=='string'||!manifest.engines.dsh||item.compatibility?.dsh!==manifest.engines.dsh)throw Error('Bundle 身份与能力声明不一致')
  const patches=Array.isArray(manifest.dsh?.bundle?.patch)?manifest.dsh.bundle.patch:[manifest.dsh?.bundle?.patch]
  if(!patches.length||patches.some(p=>typeof p!=='string'||!portable(p.replace(/^\.\//,''))||!files.has('package/'+p.replace(/^\.\//,''))))throw Error('缺少 DSH Bundle patch')
  const visited=new Set()
@@ -108,7 +108,13 @@ export function readCapabilityUpload(upload){
   }else{
    if(item.dependencies.length)throw Error('独立能力不能借用其他能力，请使用组合包')
    const a=take(raw.artifact,item.type==='plugin'?'tgz':'zip');body=a.body;item.artifact=a.artifact
-   if(item.type==='plugin')validateBundle(body,item);else skill(body,item)
+   if(item.type==='plugin'){
+     if(!item.checks.some(c=>c.type==='plugin-bundle'))throw Error('插件必须包含原生 Bundle 检查')
+     validateBundle(body,item)
+   }else{
+     if(!item.checks.some(c=>c.type==='skill-discovery'&&(c.name??item.id)===item.id))throw Error('技能必须包含自己的发现检查')
+     skill(body,item)
+   }
    if(item.runtime){
     for(const asset of item.runtime.assets){
      const a=take(asset,asset.format==='zip'?'zip':'bin')

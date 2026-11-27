@@ -1,6 +1,6 @@
 # 技术设计
 
-> 本文记录现行 0.2.12 离线实现，作为迁移基线。私服版的后续设计以[目标架构](docs/architecture/target-design.md)为准，验收及迁移见[私服联调](docs/development/registry-integration.md)和[迁移计划](docs/development/migration-plan.md)。下文的同源固定制品、直接 wheel 安装和全量离线构建是现状，不是目标约束。
+> 本文记录 0.2.12 的历史实现，作为宿主兼容与回归基线。当前管理台 ZIP 上传架构见[离线能力包协议](docs/architecture/target-design.md)和[部署与联调](docs/development/offline-deployment.md)。下文全量静态分发仅作为测试夹具，生产发布由管理台负责。
 
 ## 目标与兼容边界
 

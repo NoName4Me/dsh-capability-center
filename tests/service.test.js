@@ -1139,3 +1139,37 @@ test('built catalog prompts contain real newlines and no literal backslash-n seq
   assert.ok(multilinePromptCount >= 1)
 })
 
+
+test('管理台上传发布 Skill 和组合后，终端真实下载、安装、复用及卸载',async()=>{
+ const {Store}=await import('../apps/admin/store.js')
+ const {createAdmin}=await import('../apps/admin/server.js')
+ const {makeCapabilityZip,zipFiles}=await import('../packages/capability-sdk/pack.js')
+ const home=await tempRoot('dsh-admin-e2e-'),store=new Store(join(home,'admin')),token='fixture-admin-token-0123456789'
+ const server=createAdmin({store,token})
+ await new Promise(r=>server.listen(0,'127.0.0.1',r))
+ const base='http://127.0.0.1:'+server.address().port+'/'
+ const service=serviceFor(home,fakeContext({skills:runtimeSkills()}))
+ const headers={authorization:'Bearer '+token}
+ async function publish(item,files){
+  let res=await fetch(base+'api/admin/upload',{method:'POST',headers:{...headers,'content-type':'application/zip'},body:makeCapabilityZip(item,files)})
+  assert.equal(res.status,201,await res.text())
+  res=await fetch(base+'api/admin/change',{method:'POST',headers:{...headers,'content-type':'application/json'},body:JSON.stringify({id:item.id,version:item.version,action:'publish'})})
+  assert.equal(res.status,200,await res.text())
+ }
+ try{
+  const id='uploaded-skill',bytes=zipFiles(new Map([[id+'/SKILL.md',Buffer.from('---\nname: '+id+'\ndescription: fixture\n---\n测试正文')]]))
+  const item=skillItem(id,'1.0.0','payload/skill.zip',bytes)
+  await publish(item,new Map([[item.artifact.path,bytes]]))
+  const combo={...flatComposite('uploaded-combo',[{id,version:'1.0.0'}]),checks:[{type:'dependencies-ready'}]}
+  await publish(combo,new Map())
+  await service.initialize()
+  const installed=await installFull(service,base,id);assert.equal(installed.status,'ready',installed.error)
+  const combined=await installFull(service,base,combo.id);assert.equal(combined.status,'ready',combined.error)
+  assert.equal(service.ledger.get(id).rootInstalled,true)
+  assert.deepEqual(service.ledger.get(id).dependencyOwners,[combo.id])
+  assert.equal((await wait(service,service.startAction(base,combo.id,'uninstall'))).status,'ready')
+  assert.ok(service.ledger.get(id))
+  assert.equal((await wait(service,service.startAction(base,id,'uninstall'))).status,'ready')
+  assert.equal(service.ledger.get(id),undefined)
+ }finally{await service.dispose();await new Promise(r=>server.close(r));store.close();await rm(home,{recursive:true,force:true})}
+})
