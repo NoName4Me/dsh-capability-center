@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
-import { readZip } from '../src/engine/lib/archive.js'
+import { readZip } from '../apps/dsh-plugin/core/lib/archive.js'
 
 const prefix = '/capability-center'
 const host = '127.0.0.1'
@@ -28,7 +28,7 @@ async function previewFeedbackEmail() {
 }
 
 const [manifest, catalog] = await Promise.all([
-  readProjectFile('../src/engine/manifest.json').then(JSON.parse),
+  readProjectFile('../apps/dsh-plugin/core/manifest.json').then(JSON.parse),
   readProjectFile('../dist/catalog.json').then(JSON.parse),
 ])
 const { version } = manifest

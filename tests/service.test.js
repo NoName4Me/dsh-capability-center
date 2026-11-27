@@ -11,11 +11,11 @@ import {
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { test } from 'node:test'
-import { CoreService } from '../src/engine/service.js'
-import { readZip } from '../src/engine/lib/archive.js'
-import { LocalLedger } from '../src/engine/lib/ledger.js'
-import { validateGraph } from '../src/engine/lib/graph.js'
-import { readBoundedUrl } from '../src/bootstrap/lib/http-transport.js'
+import { CoreService } from '../apps/dsh-plugin/core/service.js'
+import { readZip } from '../apps/dsh-plugin/core/lib/archive.js'
+import { LocalLedger } from '../apps/dsh-plugin/core/lib/ledger.js'
+import { validateGraph } from '../apps/dsh-plugin/core/lib/graph.js'
+import { readBoundedUrl } from '../apps/dsh-plugin/bootstrap/lib/http-transport.js'
 import {
   catalog,
   createSkillArchive,
@@ -205,7 +205,7 @@ test('fresh-home skill install and uninstall use real artifacts and leave no par
   const home = await tempRoot('capability-center-fresh-skill-')
   const server = await reportServer(home)
   const context = fakeContext({ skills: runtimeSkills() })
-  const service = serviceFor(home, context, { http: (await import('../src/bootstrap/lib/http-transport.js')).readBoundedUrl })
+  const service = serviceFor(home, context, { http: (await import('../apps/dsh-plugin/bootstrap/lib/http-transport.js')).readBoundedUrl })
   try {
     await service.initialize()
     const installed = await installFull(service, server.base, 'report-format')

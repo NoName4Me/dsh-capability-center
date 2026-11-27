@@ -1,6 +1,6 @@
 packages:
   - apps/*
+  - apps/dsh-plugin/bootstrap
+  - apps/dsh-plugin/core
   - packages/*
-  - src/bootstrap
-  - src/engine
-  - src/capabilities/*
+  - capabilities/*

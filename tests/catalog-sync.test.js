@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { CatalogSync } from '../src/engine/lib/catalog-sync.js'
+import { CatalogSync } from '../apps/dsh-plugin/core/lib/catalog-sync.js'
 
 const item=id=>({id,type:'plugin',name:id,version:'1.0.0',description:'测试',artifact:{path:'packages/a.tgz',bytes:1,sha256:'a'.repeat(64)},install:{packageName:id},checks:[{type:'plugin-bundle'}],usage:{steps:['安装','使用'],inputs:'输入',output:'结果',example:'示例'},trial:{prompt:'试用'}})
 test('首次基线、上新、304、失败缓存、持久已读、拒绝降级',async()=>{

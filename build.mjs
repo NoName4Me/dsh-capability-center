@@ -17,7 +17,7 @@ const packages = join(dist, 'packages')
 const coreDirectory = join(dist, 'core')
 const work = join(root, '.build')
 const python = process.env.CAPABILITY_CENTER_BUILD_PYTHON || 'python3'
-const { version } = JSON.parse(await readFile(join(root, 'src', 'engine', 'manifest.json'), 'utf8'))
+const { version } = JSON.parse(await readFile(join(root, 'apps', 'dsh-plugin', 'core', 'manifest.json'), 'utf8'))
 const offlineArchive = join(root, 'capability-center-offline.zip')
 
 async function configuredFeedbackEmail() {
@@ -152,15 +152,15 @@ await mkdir(coreDirectory, { recursive: true })
 const coreBuild = join(work, 'core-build')
 await mkdir(join(coreBuild, 'engine', 'lib'), { recursive: true })
 await mkdir(join(coreBuild, 'page'), { recursive: true })
-await cp(join(root, 'src', 'engine', 'manifest.json'), join(coreBuild, 'manifest.json'))
-await cp(join(root, 'src', 'engine', 'package.json'), join(coreBuild, 'package.json'))
-await cp(join(root, 'src', 'engine', 'index.js'), join(coreBuild, 'engine', 'index.js'))
-await cp(join(root, 'src', 'engine', 'service.js'), join(coreBuild, 'engine', 'service.js'))
-await cp(join(root, 'src', 'engine', 'lib'), join(coreBuild, 'engine', 'lib'), { recursive: true })
+await cp(join(root, 'apps', 'dsh-plugin', 'core', 'manifest.json'), join(coreBuild, 'manifest.json'))
+await cp(join(root, 'apps', 'dsh-plugin', 'core', 'package.json'), join(coreBuild, 'package.json'))
+await cp(join(root, 'apps', 'dsh-plugin', 'core', 'index.js'), join(coreBuild, 'engine', 'index.js'))
+await cp(join(root, 'apps', 'dsh-plugin', 'core', 'service.js'), join(coreBuild, 'engine', 'service.js'))
+await cp(join(root, 'apps', 'dsh-plugin', 'core', 'lib'), join(coreBuild, 'engine', 'lib'), { recursive: true })
 for (const file of ['index.html', 'styles.css']) {
-  await cp(join(root, 'src', 'engine', 'page', file), join(coreBuild, 'page', file))
+  await cp(join(root, 'apps', 'dsh-plugin', 'core', 'page', file), join(coreBuild, 'page', file))
 }
-await cp(join(root, 'src', 'bootstrap', 'icon.svg'), join(coreBuild, 'page', 'icon.svg'))
+await cp(join(root, 'apps', 'dsh-plugin', 'bootstrap', 'icon.svg'), join(coreBuild, 'page', 'icon.svg'))
 run(process.execPath, [
   join(root, 'node_modules', 'typescript', 'bin', 'tsc'),
   '--project', join(root, 'tsconfig.json'),
@@ -170,7 +170,7 @@ const coreZip = join(coreDirectory, `capability-center-core-${version}.zip`)
 await makeZip(coreBuild, coreZip)
 
 const bootstrapPack = join(work, 'bootstrap')
-await cp(join(root, 'src', 'bootstrap'), bootstrapPack, { recursive: true })
+await cp(join(root, 'apps', 'dsh-plugin', 'bootstrap'), bootstrapPack, { recursive: true })
 await cp(coreBuild, join(bootstrapPack, 'engine-seed'), { recursive: true })
 const feedbackEmail = await configuredFeedbackEmail()
 if (feedbackEmail !== undefined) {
@@ -187,7 +187,7 @@ if (typeof packedBootstrap?.filename !== 'string') throw new Error('Bootstrap np
 
 const autoContinueBuild = join(work, 'auto-continue-build')
 await cp(
-  join(root, 'src', 'capabilities', 'dsh-intranet-auto-continue'),
+  join(root, 'capabilities', 'auto-continue'),
   autoContinueBuild,
   { recursive: true },
 )
@@ -200,7 +200,7 @@ if (typeof packedAutoContinue?.filename !== 'string') {
 }
 
 const ocrBuild = join(work, 'ocr-plugin-build')
-await cp(join(root, 'src', 'capabilities', 'capability-center-ocr'), ocrBuild, { recursive: true })
+await cp(join(root, 'capabilities', 'offline-ocr'), ocrBuild, { recursive: true })
 const ocrManifest = JSON.parse(await readFile(join(ocrBuild, 'package.json'), 'utf8'))
 const ocrProvenancePath = join(root, 'vendor', 'dsh-ocr-runtime-1.0.0-provenance.json')
 const ocrProvenance = JSON.parse(await readFile(ocrProvenancePath, 'utf8'))
@@ -226,7 +226,7 @@ if (typeof packedOcr?.filename !== 'string') throw new Error('OCR npm pack retur
 
 const drawioPluginBuild = join(work, 'drawio-plugin-build')
 await cp(
-  join(root, 'src', 'capabilities', 'capability-center-drawio'),
+  join(root, 'capabilities', 'drawio'),
   drawioPluginBuild,
   { recursive: true },
 )
@@ -306,7 +306,7 @@ const [packedGenui] = JSON.parse(run('npm', ['pack', '--ignore-scripts', '--json
 }))
 if (typeof packedGenui?.filename !== 'string') throw new Error('GenUI npm pack returned no filename')
 
-const officeSkillSource = join(root, 'src', 'capabilities', 'office-enhancement')
+const officeSkillSource = join(root, 'capabilities', 'office-enhancement')
 const officeSkillBuild = join(work, 'office-skill-build')
 const officeSkillRoot = join(officeSkillBuild, 'office-enhancement-skill')
 await mkdir(join(officeSkillRoot, 'scripts'), { recursive: true })

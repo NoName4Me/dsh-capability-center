@@ -4,10 +4,10 @@ import { readFile, rm } from 'node:fs/promises'
 import { gunzipSync } from 'node:zlib'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { readZip } from '../src/engine/lib/archive.js'
-import { readBoundedUrl } from '../src/bootstrap/lib/http-transport.js'
-import { satisfies } from '../src/engine/lib/semver.js'
-import { CoreService } from '../src/engine/service.js'
+import { readZip } from '../apps/dsh-plugin/core/lib/archive.js'
+import { readBoundedUrl } from '../apps/dsh-plugin/bootstrap/lib/http-transport.js'
+import { satisfies } from '../apps/dsh-plugin/core/lib/semver.js'
+import { CoreService } from '../apps/dsh-plugin/core/service.js'
 import {
   apply,
   AutoContinueController,
@@ -15,7 +15,7 @@ import {
   DEFAULT_TIMING,
   inject,
   SOURCE_KIND,
-} from '../src/capabilities/dsh-intranet-auto-continue/index.js'
+} from '../capabilities/auto-continue/index.js'
 import {
   dist,
   distributionServer,

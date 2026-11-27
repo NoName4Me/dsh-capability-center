@@ -10,12 +10,17 @@
     "dev:preview": "npm run build && node tools/preview.mjs",
     "publish:core": "node tools/publish.mjs core",
     "publish:catalog": "node tools/publish.mjs catalog",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "dev:admin": "node --watch apps/admin/server.js",
+    "start:admin": "node apps/admin/server.js",
+    "test:registry": "node --test packages/protocol/test.js apps/admin/test.js tests/catalog-sync.test.js",
+    "capability:validate": "node packages/capability-sdk/cli.js validate"
   },
   "engines": {
     "node": ">=22"
   },
   "devDependencies": {
     "typescript": "5.9.3"
-  }
+  },
+  "packageManager": "pnpm@10.18.3"
 }

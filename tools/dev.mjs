@@ -211,8 +211,8 @@ async function verifyInstalled(home, bootstrapPath) {
   }
   const installedRoot = join(profileRoot, 'node_modules', 'capability-center')
   const comparisons = [
-    ['index.js', join(root, 'src', 'bootstrap', 'index.js')],
-    ['engine-seed/engine/service.js', join(root, 'src', 'engine', 'service.js')],
+    ['index.js', join(root, 'apps', 'dsh-plugin', 'bootstrap', 'index.js')],
+    ['engine-seed/engine/service.js', join(root, 'apps', 'dsh-plugin', 'core', 'service.js')],
   ]
   for (const [relative, expected] of comparisons) {
     const [actualBytes, expectedBytes] = await Promise.all([
@@ -350,7 +350,7 @@ async function main() {
     if (shuttingDown) return
 
     const bootstrapVersion = JSON.parse(
-      await readFile(join(root, 'src', 'bootstrap', 'package.json'), 'utf8'),
+      await readFile(join(root, 'apps', 'dsh-plugin', 'bootstrap', 'package.json'), 'utf8'),
     ).version
     const bootstrapPath = await contentAddressedBootstrap(bootstrapVersion, snapshotRoot)
     if (shuttingDown) return

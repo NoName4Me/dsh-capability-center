@@ -2,9 +2,9 @@ import { DatabaseSync } from 'node:sqlite'
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { canonical, sha256, signedCatalog, SHA256 } from '../../packages/protocol/index.js'
-import { validateCatalog } from '../../src/engine/lib/manifest.js'
-import { validateGraph } from '../../src/engine/lib/graph.js'
-import { compareVersions } from '../../src/engine/lib/semver.js'
+import { validateCatalog } from '../../apps/dsh-plugin/core/lib/manifest.js'
+import { validateGraph } from '../../apps/dsh-plugin/core/lib/graph.js'
+import { compareVersions } from '../../apps/dsh-plugin/core/lib/semver.js'
 
 export class Store {
   constructor(root,{privateKey}={}) {

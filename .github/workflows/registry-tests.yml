@@ -1,7 +1,7 @@
 name: 私服架构测试
 on:
   push:
-    paths: ['apps/**', 'packages/**', 'src/**', 'tests/**', 'pnpm-workspace.yaml', '.github/workflows/registry-tests.yml']
+    paths: ['apps/**', 'packages/**', 'capabilities/**', 'tools/**', 'build.mjs', 'package.json', 'pnpm-lock.yaml', 'tests/**', 'pnpm-workspace.yaml', '.github/workflows/registry-tests.yml']
   pull_request:
   workflow_dispatch:
 permissions:
@@ -18,3 +18,17 @@ jobs:
 
       - run: npm ci
       - run: npm run typecheck
+      - name: 生成 pnpm workspace 锁文件
+        run: |
+          npm install -g pnpm@10.18.3
+          pnpm install --lockfile-only --ignore-scripts
+          cat pnpm-lock.yaml
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - name: 现行功能完整回归
+        run: |
+          python -m pip install --disable-pip-version-check python-docx==1.2.0 openpyxl==3.1.5 python-pptx==1.0.2 pandas==3.0.1
+          export CAPABILITY_CENTER_BUILD_PYTHON="$(command -v python)"
+          export CAPABILITY_CENTER_TEST_PYTHON="$CAPABILITY_CENTER_BUILD_PYTHON"
+          npm test

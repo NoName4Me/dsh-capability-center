@@ -6,7 +6,7 @@ import vm from 'node:vm'
 import { root } from './helpers.js'
 
 test('client bridge creates a fresh DSH chat with a prefilled prompt and never sends it', async () => {
-  const code = await readFile(join(root, 'src', 'bootstrap', 'client.js'), 'utf8')
+  const code = await readFile(join(root, 'apps', 'dsh-plugin', 'bootstrap', 'client.js'), 'utf8')
   assert.doesNotMatch(code, /\.submit\s*\(/u)
   let registration
   const listeners = new Map()
@@ -257,10 +257,10 @@ test('client bridge creates a fresh DSH chat with a prefilled prompt and never s
 
 test('UI source exposes category filters, card details, update results and offline management', async () => {
   const [html, app, css, client] = await Promise.all([
-    readFile(join(root, 'src', 'engine', 'page', 'index.html'), 'utf8'),
-    readFile(join(root, 'src', 'engine', 'page', 'app.ts'), 'utf8'),
-    readFile(join(root, 'src', 'engine', 'page', 'styles.css'), 'utf8'),
-    readFile(join(root, 'src', 'bootstrap', 'client.js'), 'utf8'),
+    readFile(join(root, 'apps', 'dsh-plugin', 'core', 'page', 'index.html'), 'utf8'),
+    readFile(join(root, 'apps', 'dsh-plugin', 'core', 'page', 'app.ts'), 'utf8'),
+    readFile(join(root, 'apps', 'dsh-plugin', 'core', 'page', 'styles.css'), 'utf8'),
+    readFile(join(root, 'apps', 'dsh-plugin', 'bootstrap', 'client.js'), 'utf8'),
   ])
   for (const label of ['全部', '技能', '插件', 'MCP', '能力包', '已安装']) {
     assert.match(html, new RegExp(`>${label}<`, 'u'))

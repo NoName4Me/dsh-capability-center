@@ -1,6 +1,6 @@
 # Monorepo 与私服架构迁移计划
 
-状态：待实施。设计基线见 [目标架构](../architecture/target-design.md)，验收见 [私服联调](registry-integration.md)。
+状态：迁移进行中。已建立 workspace 目录及私服管理端，锁文件及完整回归以 CI 结果为准。设计基线见 [目标架构](../architecture/target-design.md)，验收见 [私服联调](registry-integration.md)。
 
 ## 原则
 

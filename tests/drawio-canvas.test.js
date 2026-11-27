@@ -20,11 +20,11 @@ import {
   DRAWIO_TOOL_NAMES,
   createDiagramXml,
   updateDiagramCells,
-} from '../src/capabilities/capability-center-drawio/index.js'
+} from '../capabilities/drawio/index.js'
 import {
   createDrawioDesignContext,
   createDrawioSelectionContext,
-} from '../src/capabilities/capability-center-drawio/plugin.js'
+} from '../capabilities/drawio/plugin.js'
 import { dist, python, root, tempRoot } from './helpers.js'
 
 const runFile = promisify(execFile)
@@ -482,7 +482,7 @@ test('unknown pages and cells fail without changing the board revision', async (
 
 test('client gates only plain idle sends and pre-step context carries the exact selection', async () => {
   const source = await readFile(
-    join(root, 'src', 'capabilities', 'capability-center-drawio', 'client.js'),
+    join(root, 'capabilities', 'drawio', 'client.js'),
     'utf8',
   )
   const insertion = '\n    module.exports = {'
@@ -566,7 +566,7 @@ test('client gates only plain idle sends and pre-step context carries the exact 
 
 test('minimal editor canvas setup uses a static DOM snapshot and bounded load retries', async () => {
   const source = await readFile(
-    join(root, 'src', 'capabilities', 'capability-center-drawio', 'client.js'),
+    join(root, 'capabilities', 'drawio', 'client.js'),
     'utf8',
   )
   const configurationSource = source.slice(
@@ -609,7 +609,7 @@ test('minimal editor canvas setup uses a static DOM snapshot and bounded load re
 
 test('canvas layout collapses only an expanded global sidebar and restores its own state', async () => {
   const source = await readFile(
-    join(root, 'src', 'capabilities', 'capability-center-drawio', 'client.js'),
+    join(root, 'capabilities', 'drawio', 'client.js'),
     'utf8',
   )
   assert.match(source, /document\.querySelector\('\[data-shell-bottom\]'\)\?\.parentElement/u)
@@ -669,7 +669,7 @@ test('built plugin contains deterministic same-origin editor assets, licenses, a
   assert.equal(provenance.version, '0.4.15')
   assert.equal(provenance.license, 'Apache-2.0')
   assert.equal(provenance.drawioVersion, 'v32.0.2')
-  const client = await readFile(join(root, 'src', 'capabilities', 'capability-center-drawio', 'client.js'), 'utf8')
+  const client = await readFile(join(root, 'capabilities', 'drawio', 'client.js'), 'utf8')
   assert.match(client, /convertValueToString\(cell\)/u)
   assert.doesNotMatch(client, /mxUtils\?\.getTextContent/u)
   assert.match(client, /导出 \.drawio/u)

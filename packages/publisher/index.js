@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { gunzipSync } from 'node:zlib'
 import { PACKAGE_NAME, VERSION, registryUrl, pluginDescriptor, sha256 } from '../protocol/index.js'
-import { readBoundedUrl } from '../../src/bootstrap/lib/http-transport.js'
+import { readBoundedUrl } from '../../apps/dsh-plugin/bootstrap/lib/http-transport.js'
 
 const MAX = 32*1024*1024
 

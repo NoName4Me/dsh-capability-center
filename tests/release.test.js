@@ -10,8 +10,8 @@ import http from 'node:http'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { test } from 'node:test'
-import { readZip } from '../src/engine/lib/archive.js'
-import { requestBounded } from '../src/bootstrap/lib/http-transport.js'
+import { readZip } from '../apps/dsh-plugin/core/lib/archive.js'
+import { requestBounded } from '../apps/dsh-plugin/bootstrap/lib/http-transport.js'
 import {
   createSkillArchive,
   dist,
@@ -274,8 +274,8 @@ test('Node 24 core HTTP transport completes a 64 KiB close/FIN response without 
     })
     assert.equal(received.bytes, payload.byteLength)
     const sources = await Promise.all([
-      readFile(join(root, 'src', 'bootstrap', 'lib', 'http-transport.js'), 'utf8'),
-      readFile(join(root, 'src', 'engine', 'lib', 'installers.js'), 'utf8'),
+      readFile(join(root, 'apps', 'dsh-plugin', 'bootstrap', 'lib', 'http-transport.js'), 'utf8'),
+      readFile(join(root, 'apps', 'dsh-plugin', 'core', 'lib', 'installers.js'), 'utf8'),
     ])
     assert.doesNotMatch(sources.join('\n'), /\bglobalThis\.fetch\b|\bfetch\s*\(/u)
   } finally {

@@ -7,5 +7,5 @@
     "noEmitOnError": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/engine/page/**/*.ts"]
+  "include": ["apps/dsh-plugin/core/page/**/*.ts"]
 }

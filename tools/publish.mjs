@@ -12,10 +12,10 @@ import {
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
-import { readZip, safeRelativePath } from '../src/engine/lib/archive.js'
-import { validateGraph } from '../src/engine/lib/graph.js'
-import { validateCatalog, CapabilityError } from '../src/engine/lib/manifest.js'
-import { compareVersions, parseVersion } from '../src/engine/lib/semver.js'
+import { readZip, safeRelativePath } from '../apps/dsh-plugin/core/lib/archive.js'
+import { validateGraph } from '../apps/dsh-plugin/core/lib/graph.js'
+import { validateCatalog, CapabilityError } from '../apps/dsh-plugin/core/lib/manifest.js'
+import { compareVersions, parseVersion } from '../apps/dsh-plugin/core/lib/semver.js'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const CORE_PROTOCOL = 1

@@ -9,8 +9,8 @@ import {
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { test } from 'node:test'
-import { CoreService } from '../src/engine/service.js'
-import { readBoundedUrl } from '../src/bootstrap/lib/http-transport.js'
+import { CoreService } from '../apps/dsh-plugin/core/service.js'
+import { readBoundedUrl } from '../apps/dsh-plugin/bootstrap/lib/http-transport.js'
 import {
   catalog,
   createVenv,

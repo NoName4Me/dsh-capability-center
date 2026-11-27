@@ -1,0 +1,11 @@
+{
+  "name": "@dsh-capability/terminal",
+  "version": "0.2.12",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node ../../tools/dev.mjs",
+    "build": "node ../../build.mjs",
+    "typecheck": "tsc --project ../../tsconfig.json --noEmit"
+  }
+}

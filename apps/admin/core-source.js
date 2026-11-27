@@ -1,5 +1,5 @@
 import { registryUrl, SHA256, sha256, signedCatalog, VERSION } from '../../packages/protocol/index.js'
-import { readBoundedUrl } from '../../src/bootstrap/lib/http-transport.js'
+import { readBoundedUrl } from '../../apps/dsh-plugin/bootstrap/lib/http-transport.js'
 
 export class CoreSource {
   constructor(raw, {privateKey, token, read=readBoundedUrl}={}){

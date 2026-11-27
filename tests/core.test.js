@@ -14,9 +14,9 @@ import { test } from 'node:test'
 import {
   EngineSupervisor,
   normalizeDevDistributionUrl,
-} from '../src/bootstrap/lib/supervisor.js'
-import { readZip } from '../src/engine/lib/archive.js'
-import { readBoundedUrl } from '../src/bootstrap/lib/http-transport.js'
+} from '../apps/dsh-plugin/bootstrap/lib/supervisor.js'
+import { readZip } from '../apps/dsh-plugin/core/lib/archive.js'
+import { readBoundedUrl } from '../apps/dsh-plugin/bootstrap/lib/http-transport.js'
 import {
   createZip,
   dist,

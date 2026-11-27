@@ -3,7 +3,7 @@
 - [安装、使用与发布说明](../README.md)
 - [产品定位](../PRODUCT.md)
 - [架构与兼容设计](../DESIGN.md)
-- [Office 增强技能使用说明](../src/capabilities/office-enhancement/SKILL.md)
+- [Office 增强技能使用说明](../capabilities/office-enhancement/SKILL.md)
 
 ## 下一阶段（目标设计，尚未落地）
 

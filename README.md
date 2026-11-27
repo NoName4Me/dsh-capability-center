@@ -35,7 +35,7 @@ npm run dev -- --dsh /path/to/dsh
 
 DSH 查找顺序是 `--dsh`、`CAPABILITY_CENTER_DSH_BIN`、PATH 中的 `dsh`，最后是 macOS 桌面路径 `/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh`。可用 `CAPABILITY_CENTER_DEV_DSH_HOME` 覆盖隔离 home，但同一仓库仍只允许一个开发实例。
 
-页面交互源码位于 [app.ts](src/engine/page/app.ts)。`npm run typecheck` 运行 TypeScript 严格类型检查，构建时会编译出 DSH 加载的 `page/app.js`。
+页面交互源码位于 [app.ts](apps/dsh-plugin/core/page/app.ts)。`npm run typecheck` 运行 TypeScript 严格类型检查，构建时会编译出 DSH 加载的 `page/app.js`。
 
 仅查看页面和目录时可运行 `npm run dev:preview`。它保留原预览行为，默认地址为 [http://127.0.0.1:4173/capability-center/](http://127.0.0.1:4173/capability-center/)，端口可通过 `CAPABILITY_CENTER_PREVIEW_PORT` 指定。预览和构建都会读取 `CAPABILITY_CENTER_FEEDBACK_EMAIL`；未设置进程环境变量时，本地构建读取被 git 忽略的 `.env`。
 
@@ -132,7 +132,7 @@ macOS 桌面自带 DSH 没有在官方 Web profile 中启用 `load_workspace_dep
 
 “Office 增强”是一个可见能力包，内部固定引用隐藏技能 `office-enhancement-skill@1.0.0` 和隐藏包 `python-pypdf@7.1.0`。它复用 DSH Python 中的 `python-docx 1.2.0`、`openpyxl 3.1.5`、`python-pptx 1.0.2`、`pandas 3.0.1`，并要求 Python `>=3.11 <3.13`。兼容目标为 DSH `0.2.1-rc.2`。
 
-安装后的自动检查会读取真实 DSH Python，校验固定版本，并在系统临时目录创建合成文件，实际执行 PDF、DOCX、XLSX 和 PPTX 操作。全程使用安装包内哈希固定的 `office_smoke.py` 和 `office_tools.py`，从目录执行任意 shell 脚本的路径不存在。详细技能说明见 [`src/capabilities/office-enhancement/SKILL.md`](src/capabilities/office-enhancement/SKILL.md)；安装后的技能目录由 DSH 技能注册表显示为 `office-enhancement-skill`。
+安装后的自动检查会读取真实 DSH Python，校验固定版本，并在系统临时目录创建合成文件，实际执行 PDF、DOCX、XLSX 和 PPTX 操作。全程使用安装包内哈希固定的 `office_smoke.py` 和 `office_tools.py`，从目录执行任意 shell 脚本的路径不存在。详细技能说明见 [`capabilities/office-enhancement/SKILL.md`](capabilities/office-enhancement/SKILL.md)；安装后的技能目录由 DSH 技能注册表显示为 `office-enhancement-skill`。
 
 Office 工具只处理本地文件，不调用 WPS。输入保持只读，每条命令都要求新的输出路径，并拒绝覆盖已存在文件、符号链接、模板、数据 JSON、图片或其他输入。支持的操作如下：
 
