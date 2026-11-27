@@ -48,7 +48,7 @@ function bundleInfo(overrides = {}) {
 
 function serviceFor(home, context) {
   return new CoreService(context, {
-    version: '0.3.0',
+    version: '0.3.1',
     dataRoot: join(home, 'capability-center'),
     http: { readBoundedUrl },
     dshHome: home,
@@ -911,10 +911,10 @@ test('offline package, artifact manifest and ZIP distribute the catalog plugin T
   assert.equal(sha256(archive.get(offlinePath)), artifactManifest.artifacts.autoContinue.sha256)
 
   const bootstrap = readTarGz(await readFile(
-    join(dist, 'packages', 'capability-center-0.3.0.tgz'),
+    join(dist, 'packages', 'capability-center-0.3.1.tgz'),
   ))
   const bootstrapManifest = JSON.parse(bootstrap.get('package/package.json').toString('utf8'))
-  assert.equal(bootstrapManifest.version, '0.3.0')
+  assert.equal(bootstrapManifest.version, '0.3.1')
   assert.equal(bootstrapManifest.engines.dsh, '>=0.2.1-rc.2 <0.2.3')
   for (const version of ['0.2.1-rc.2', '0.2.1-rc.5', '0.2.2-rc.1', '0.2.2-rc.2']) {
     assert.equal(satisfies(version, bootstrapManifest.engines.dsh), true, version)

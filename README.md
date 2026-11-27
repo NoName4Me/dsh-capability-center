@@ -24,7 +24,7 @@ pnpm pack:target office-enhancement
 pnpm pack:target genui
 ```
 
-每项生成 dist-independent/<目标>/*.upload.zip，直接在管理台选择上传、检查声明、发布。中心的 packages/capability-center-0.3.0.tgz 是首次引导安装的 DSH 原生文件；后续核心更新通过 center 的上传 ZIP 发布。第三方能力参见 [离线能力包协议](docs/architecture/target-design.md)，一般使用 `pnpm pack:capability capability.json output.zip`。
+每项生成 dist-independent/<目标>/*.upload.zip，直接在管理台选择上传、检查声明、发布。中心的 packages/capability-center-0.3.1.tgz 是首次引导安装的 DSH 原生文件；后续核心更新通过 center 的上传 ZIP 发布。第三方能力参见 [离线能力包协议](docs/architecture/target-design.md)，一般使用 `pnpm pack:capability capability.json output.zip`。
 
 ## 独立部署管理台
 

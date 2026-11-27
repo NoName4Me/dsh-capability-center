@@ -221,7 +221,6 @@ const ocrBuild = join(work, 'ocr-plugin-build')
 await cp(join(root, 'capabilities', 'offline-ocr'), ocrBuild, { recursive: true, filter: source => basename(source) !== 'node_modules' })
 const ocrManifest = JSON.parse(await readFile(join(ocrBuild, 'package.json'), 'utf8'))
 // One identical, self-contained artifact for both local regression and admin uploads.
-ocrManifest.version += '-offline.1'
 ocrManifest.bundleDependencies = Object.keys(ocrManifest.dependencies)
 await writeFile(join(ocrBuild, 'package.json'), JSON.stringify(ocrManifest, null, 2) + '\n')
 const ocrProvenancePath = join(root, 'vendor', 'dsh-ocr-runtime-1.0.0-provenance.json')

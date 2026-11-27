@@ -1,6 +1,6 @@
 {
   "name": "capability-center-ocr",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Offline Chinese and English image OCR for DSH",
   "type": "module",
   "main": "plugin.js",
@@ -55,5 +55,9 @@
       "x64",
       "arm64"
     ]
-  }
+  },
+  "bundleDependencies": [
+    "tesseract.js",
+    "image-size"
+  ]
 }

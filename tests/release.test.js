@@ -43,7 +43,7 @@ test('packaged OCR recognizes the bilingual fixture using its local runtime', as
   const temp = await tempRoot('capability-center-ocr-')
   try {
     await runFile(python, [
-      '-m', 'tarfile', '-e', join(dist, 'packages', 'capability-center-ocr-0.2.0-offline.1.tgz'), temp,
+      '-m', 'tarfile', '-e', join(dist, 'packages', 'capability-center-ocr-0.2.1.tgz'), temp,
     ])
     const bundle = join(temp, 'package')
     const { stdout } = await runFile(process.execPath, [
@@ -73,14 +73,14 @@ test('offline archive is complete, contains current release metadata, and landin
     'capability-center/index.html',
     'capability-center/start-server.py',
     'capability-center/start-server.cmd',
-    'capability-center/packages/capability-center-0.3.0.tgz',
+    'capability-center/packages/capability-center-0.3.1.tgz',
     'capability-center/packages/capability-center-drawio-0.2.0.tgz',
-    'capability-center/packages/capability-center-ocr-0.2.0-offline.1.tgz',
+    'capability-center/packages/capability-center-ocr-0.2.1.tgz',
     'capability-center/packages/changfenhuang-dsh-genui-0.16.0.tgz',
     'capability-center/packages/dsh-intranet-auto-continue-1.2.0.tgz',
     'capability-center/packages/office-enhancement-skill-1.0.0.zip',
     'capability-center/packages/pypdf-7.1.0-py3-none-any.whl',
-    'capability-center/core/capability-center-core-0.3.0.zip',
+    'capability-center/core/capability-center-core-0.3.1.zip',
   ]) {
     assert.ok(names.includes(required), `offline archive is missing ${required}`)
   }
@@ -94,13 +94,13 @@ test('offline archive is complete, contains current release metadata, and landin
   ])
   const landing = archive.get('capability-center/index.html').toString('utf8')
   assert.doesNotMatch(landing, /\{\{BOOTSTRAP_URL\}\}/u)
-  assert.match(landing, /capability-center-0\.3\.0\.tgz/u)
+  assert.match(landing, /capability-center-0\.3\.1\.tgz/u)
   const manifest = JSON.parse(
     archive.get('capability-center/artifact-manifest.json').toString('utf8'),
   )
-  assert.equal(manifest.artifacts.bootstrap.path, 'packages/capability-center-0.3.0.tgz')
+  assert.equal(manifest.artifacts.bootstrap.path, 'packages/capability-center-0.3.1.tgz')
   const registry = JSON.parse(archive.get('capability-center/publication-registry.json').toString('utf8'))
-  assert.equal(registry.entries['core@0.3.0'].kind, 'core')
+  assert.equal(registry.entries['core@0.3.1'].kind, 'core')
   assert.equal(registry.entries['dsh-intranet-auto-continue@1.2.0'].type, 'plugin')
   assert.equal(registry.entries['capability-center-drawio@0.2.0'].type, 'plugin')
   assert.equal(registry.entries['dsh-genui@0.16.0'].type, 'plugin')
@@ -231,7 +231,7 @@ test('read-only distribution server serves built assets, HEAD, immutable paths, 
     const catalog = await httpGet(`${base}catalog.json`)
     assert.equal(catalog.status, 200)
     assert.match(catalog.headers['content-type'], /application\/json/u)
-    const initial = /Initial plugin URL: (http:\/\/127\.0\.0\.1:\d+\/packages\/capability-center-0\.3\.0\.tgz)/u
+    const initial = /Initial plugin URL: (http:\/\/127\.0\.0\.1:\d+\/packages\/capability-center-0\.3\.1\.tgz)/u
       .exec(stdout)
     assert.ok(initial, `server did not advertise the stable bootstrap:\n${stdout}`)
     assert.doesNotMatch(stdout, /Initial plugin URL: .*capability-center-drawio/u)

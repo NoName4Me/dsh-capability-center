@@ -43,7 +43,7 @@ ZIP 根目录必须有 capability.json，结构为 {"schemaVersion":1,"item":{..
     "description": "组合办公增强与离线识别",
     "dependencies": [
       {"id": "office-enhancement", "version": "1.1.0"},
-      {"id": "capability-center-ocr", "version": "0.2.0-offline.1"}
+      {"id": "capability-center-ocr", "version": "0.2.1"}
     ],
     "checks": [{"type": "dependencies-ready"}],
     "usage": {"steps": ["安装组合", "使用子能力"], "inputs": "本地文档", "output": "处理结果", "example": "识别文档并处理 PDF"},

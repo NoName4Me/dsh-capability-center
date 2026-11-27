@@ -666,7 +666,7 @@ test('development distribution URL is loopback-only and the page meta appears on
 
   const temp = await tempRoot('capability-center-dev-meta-')
   const home = join(temp, 'home')
-  const files = readZip(await readFile(join(dist, 'core', 'capability-center-core-0.3.0.zip')))
+  const files = readZip(await readFile(join(dist, 'core', 'capability-center-core-0.3.1.zip')))
   const coreRoot = join(temp, 'release')
   for (const [name, bytes] of files) {
     const target = join(coreRoot, ...name.split('/'))
@@ -678,7 +678,7 @@ test('development distribution URL is loopback-only and the page meta appears on
   )
   const page = async devDistributionUrl => {
     const service = new BuiltCoreService(fakeContext(), {
-      version: '0.3.0',
+      version: '0.3.1',
       dataRoot: join(home, 'capability-center'),
       http: { readBoundedUrl },
       devDistributionUrl,
@@ -793,7 +793,7 @@ test('actual built core ZIP serves its UI from the release-root page directory',
   const temp = await tempRoot('capability-center-built-core-page-')
   const home = join(temp, 'home')
   try {
-    const files = readZip(await readFile(join(dist, 'core', 'capability-center-core-0.3.0.zip')))
+    const files = readZip(await readFile(join(dist, 'core', 'capability-center-core-0.3.1.zip')))
     assert.equal([...files.keys()].some(name => name.endsWith('.ts')), false)
     const coreRoot = join(temp, 'release')
     for (const [name, bytes] of files) {
@@ -826,7 +826,7 @@ test('actual built core ZIP serves its UI from the release-root page directory',
     await withHome(home, async () => {
       await module.apply(ctx, {
         runtime: {
-          version: '0.3.0',
+          version: '0.3.1',
           dataRoot: join(home, 'capability-center'),
           http: { readBoundedUrl },
           setEngine(value) { engine = value },
