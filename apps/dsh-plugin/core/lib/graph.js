@@ -64,8 +64,8 @@ export function planCapabilities(catalog, rootId) {
 }
 
 export function validateGraph(catalog) {
-  for (const item of catalog.items) {
-    planCapabilities(catalog, item.id)
+  for (const item of catalog.versions??catalog.items) {
+    planCapabilities({...catalog,items:catalog.items.map(v=>v.id===item.id?item:v)},item.id)
   }
   return true
 }

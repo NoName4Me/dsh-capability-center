@@ -8,15 +8,14 @@
     "test": "node build.mjs && node --test --test-concurrency=1 tests/*.test.js",
     "dev": "exec node tools/dev.mjs",
     "dev:preview": "npm run build && node tools/preview.mjs",
-    "publish:core": "node tools/publish.mjs core",
-    "publish:catalog": "node tools/publish.mjs catalog",
     "typecheck": "tsc --noEmit",
     "dev:admin": "node --watch apps/admin/server.js",
     "start:admin": "node apps/admin/server.js",
-    "test:registry": "node --test packages/protocol/test.js apps/admin/test.js tests/catalog-sync.test.js tests/runtime.test.js",
     "capability:validate": "node packages/capability-sdk/cli.js validate",
     "pack:target": "node build.mjs --target",
-    "test:packages": "node --test packages/protocol/test.js apps/admin/test.js tests/catalog-sync.test.js tests/runtime.test.js"
+    "test:packages": "node --test packages/protocol/test.js apps/admin/test.js tests/catalog-sync.test.js tests/runtime.test.js",
+    "pack:capability": "node packages/capability-sdk/cli.js pack",
+    "inspect:capability": "node packages/capability-sdk/cli.js inspect"
   },
   "engines": {
     "node": ">=22"

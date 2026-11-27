@@ -10,6 +10,8 @@ import {
 } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { pluginDescriptor, sha256 as hashBytes } from './packages/protocol/index.js'
+import { makeCapabilityZip, zipFiles } from './packages/capability-sdk/pack.js'
 
 const root = dirname(fileURLToPath(import.meta.url))
 const target = process.argv[2] === '--target' ? process.argv[3] : undefined
@@ -218,11 +220,9 @@ async function buildOcr() {
 const ocrBuild = join(work, 'ocr-plugin-build')
 await cp(join(root, 'capabilities', 'offline-ocr'), ocrBuild, { recursive: true, filter: source => basename(source) !== 'node_modules' })
 const ocrManifest = JSON.parse(await readFile(join(ocrBuild, 'package.json'), 'utf8'))
-if (!target) {
-  // The legacy archive is a different immutable npm release; never publish it under the registry version.
-  ocrManifest.version += '-offline.1'
-  ocrManifest.bundleDependencies = Object.keys(ocrManifest.dependencies)
-}
+// One identical, self-contained artifact for both local regression and admin uploads.
+ocrManifest.version += '-offline.1'
+ocrManifest.bundleDependencies = Object.keys(ocrManifest.dependencies)
 await writeFile(join(ocrBuild, 'package.json'), JSON.stringify(ocrManifest, null, 2) + '\n')
 const ocrProvenancePath = join(root, 'vendor', 'dsh-ocr-runtime-1.0.0-provenance.json')
 const ocrProvenance = JSON.parse(await readFile(ocrProvenancePath, 'utf8'))
@@ -232,7 +232,7 @@ if (createHash('sha256').update(ocrRuntime).digest('hex') !== ocrProvenance.sha2
 }
 for (const [path, bytes] of tarFiles(ocrRuntime)) {
   const parts = path.split('/')
-  if (parts[0] !== 'package' || !['node_modules', 'tessdata'].includes(parts[1]) || (target && parts[1] === 'node_modules')) continue
+  if (parts[0] !== 'package' || !['node_modules', 'tessdata'].includes(parts[1])) continue
   if (parts.some(part => !part || part === '.' || part === '..' || /[:\\]/u.test(part))) {
     throw new Error(`Invalid OCR runtime path: ${path}`)
   }
@@ -378,31 +378,44 @@ await cp(
 return { officeSkillZip, officeSkillRoot, officeSkillBuild }
 }
 
+async function uploadZip(item, payloads){
+  const files=new Map()
+  for(const [key,path] of payloads){
+    const bytes=await readFile(path),name='payload/'+basename(path)
+    key.path=name;key.bytes=bytes.length;key.sha256=hashBytes(bytes);files.set(name,bytes)
+  }
+  const output=join(dist,item.id+'-'+item.version+'.upload.zip')
+  await writeFile(output,makeCapabilityZip(item,files))
+  console.log('管理台上传包：'+output)
+}
 if (target) {
   const builders = {'center':buildCenter,'auto-continue':buildAutoContinue,'offline-ocr':buildOcr,'drawio':buildDrawio,'genui':buildGenui,'office-enhancement':buildOffice}
   const result = await builders[target]()
-  if (target === 'center') {
-    await writeFile(join(dist, 'core-release-index.json'), JSON.stringify({schemaVersion:1,name:'能力中心核心版本',protocolVersion:1,targetDsh:'dsh-v0.2.1-rc.2',releases:[]},null,2)+'\n')
-    run(process.execPath,[join(root,'tools','publish.mjs'),'core','--storage',dist,'--archive',result.coreZip])
-  }
-  if (target === 'office-enhancement') {
+  if(target==='center'){
+    const item={id:'capability-center-core',type:'core',version,artifact:{}}
+    await uploadZip(item,[[item.artifact,result.coreZip]])
+  }else if(target==='office-enhancement'){
     const id='office-enhancement'
-    const skillRoot=join(work,'registry-skill',id)
+    const skillRoot=join(work,'upload-skill',id)
     await cp(result.officeSkillRoot,skillRoot,{recursive:true})
     let skill=await readFile(join(skillRoot,'SKILL.md'),'utf8')
     skill=skill.replace('name: office-enhancement-skill','name: office-enhancement')
-      .replace('先调用 `load_workspace_dependencies` 获取 DSH 返回的 `python` 与 `pythonPackages`。所有 Python 命令都必须使用该解释器','本能力脚本必须使用技能末尾注明的独立 Python 解释器（下文变量 DSH_PYTHON 指该解释器）。调用 DSH 原生渲染、导出、重算技能时另按宿主说明获取原生运行时')
-      .replace('这里要求的是能力中心核心 `v0.2.2` 或更高，不是 DSH 本身 `v0.2.2`。旧能力中心核心应先更新并重启，否则目录会因缺少固定自动检查而按设计拒绝加载。','安装前要求能力中心 0.3.0，独立环境继承 DSH 内置 Office 库。')
+      .replace('先调用 '+String.fromCharCode(96)+'load_workspace_dependencies'+String.fromCharCode(96)+' 获取 DSH 返回的 '+String.fromCharCode(96)+'python'+String.fromCharCode(96)+' 与 '+String.fromCharCode(96)+'pythonPackages'+String.fromCharCode(96)+'。所有 Python 命令都必须使用该解释器','本能力脚本必须使用技能末尾注明的独立 Python 解释器（下文 DSH_PYTHON 指该解释器）。调用 DSH 原生渲染、导出、重算时另按宿主说明获取运行时')
+      .replace(/这里要求的是能力中心核心.*?按设计拒绝加载。/,'本能力的独立环境继承 DSH 内置 Office 库。')
     await writeFile(join(skillRoot,'SKILL.md'),skill)
-    const rawDir=join(dist,'skills',id,'1.1.0');await mkdir(rawDir,{recursive:true})
-    const zip=join(rawDir,'skill.zip');await makeZip(join(work,'registry-skill'),zip)
-    const wheel=await artifact(join(packages,'pypdf-7.1.0-py3-none-any.whl'))
-    const a=await artifact(zip)
-    const descriptor={id,type:'skill',name:'Office 增强',version:'1.1.0',description:'PDF、Word、Excel、PPT 本地增强，复用 DSH 原生 Office 运行时。',compatibility:{dsh:'0.2.1-rc.2',python:'>=3.11.0 <3.13.0',os:['win32','darwin','linux'],arch:['x64','arm64']},artifact:{path:'skills/office-enhancement/1.1.0/skill.zip',bytes:a.bytes,sha256:a.sha256},runtime:{python:{inheritBuiltin:true,requirements:[{name:'pypdf',version:'7.1.0',hashes:[wheel.sha256]}]}},checks:[{type:'python-import',module:'pypdf',version:'7.1.0'},{type:'python-import',module:'docx'},{type:'python-import',module:'openpyxl'},{type:'python-import',module:'pptx'},{type:'python-import',module:'pandas'}],usage:{steps:['安装并检查独立 Python 环境。','在对话中使用 office-enhancement 技能；原生 Office 导出、渲染与重算按宿主说明执行。'],inputs:'本地 PDF、DOCX、XLSX、PPTX',output:'新文件及操作摘要',example:'使用独立环境合并两个本地 PDF。'},trial:{prompt:'请使用 office-enhancement 技能，使用该技能标注的独立 Python 执行 scripts/office_smoke.py，并如实报告检查结果。'}}
-    await writeFile(join(rawDir,'capability.json'),JSON.stringify(descriptor,null,2)+'\n')
+    const zip=join(work,'skill.zip');await makeZip(join(work,'upload-skill'),zip)
+    const wheelName='pypdf-7.1.0-py3-none-any.whl',wheel=await readFile(join(packages,wheelName))
+    const wheelhouse=join(work,'wheelhouse.zip');await writeFile(wheelhouse,zipFiles(new Map([[wheelName,wheel]])))
+    const asset={name:'wheelhouse',format:'zip'}
+    const item={id,type:'skill',name:'Office 增强',version:'1.1.0',description:'PDF、Word、Excel、PPT 本地增强，复用 DSH 原生 Office 运行时。',compatibility:{dsh:'0.2.1-rc.2',python:'>=3.11.0 <3.13.0',os:['win32','darwin','linux'],arch:['x64','arm64']},artifact:{},runtime:{python:{inheritBuiltin:true,requirements:[{name:'pypdf',version:'7.1.0',hashes:[hashBytes(wheel)]}]},assets:[asset]},checks:[{type:'skill-discovery',name:id},{type:'python-import',module:'pypdf',version:'7.1.0'},{type:'python-import',module:'docx'},{type:'python-import',module:'openpyxl'},{type:'python-import',module:'pptx'},{type:'python-import',module:'pandas'}],usage:{steps:['安装并检查独立 Python 环境。','在对话中使用 office-enhancement 技能；原生 Office 导出、渲染与重算按宿主说明执行。'],inputs:'本地 PDF、DOCX、XLSX、PPTX',output:'新文件及操作摘要',example:'使用独立环境合并两个本地 PDF。'},trial:{prompt:'请使用 office-enhancement 技能，使用该技能标注的独立 Python 执行 scripts/office_smoke.py，并如实报告检查结果。'}}
+    await uploadZip(item,[[item.artifact,zip],[asset,wheelhouse]])
+  }else{
+    const [manifest,packed]=Object.values(result)
+    const overlay=target==='genui'?{id:'dsh-genui',title:'GenUI 交互式回复',description:'在 DSH 回复中展示交互式图表、表格和表单。',os:['win32','darwin'],arch:['x64','arm64']}:undefined
+    const item={...pluginDescriptor(manifest,overlay),artifact:{}}
+    await uploadZip(item,[[item.artifact,join(packages,packed.filename)]])
   }
   await rm(work,{recursive:true,force:true})
-  console.log('独立构建完成: '+dist)
   process.exit(0)
 }
 
