@@ -21,7 +21,7 @@ jobs:
       - name: 生成 pnpm workspace 锁文件
         run: |
           npm install -g pnpm@10.18.3
-          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm install --lockfile-only --frozen-lockfile --ignore-scripts
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.12'
@@ -31,3 +31,11 @@ jobs:
           export CAPABILITY_CENTER_BUILD_PYTHON="$(command -v python)"
           export CAPABILITY_CENTER_TEST_PYTHON="$CAPABILITY_CENTER_BUILD_PYTHON"
           npm test
+      - name: 验证独立构建
+        run: |
+          npm run pack:target -- center
+          npm run pack:target -- auto-continue
+          npm run pack:target -- offline-ocr
+          npm run pack:target -- drawio
+          npm run pack:target -- genui
+          npm run pack:target -- office-enhancement

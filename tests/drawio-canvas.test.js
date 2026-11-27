@@ -630,7 +630,7 @@ test('canvas layout collapses only an expanded global sidebar and restores its o
 })
 
 test('built plugin contains deterministic same-origin editor assets, licenses, and provenance', async () => {
-  const archive = join(dist, 'packages', 'capability-center-drawio-0.1.8.tgz')
+  const archive = join(dist, 'packages', 'capability-center-drawio-0.2.0.tgz')
   const bytes = await readFile(archive)
   assert.ok(bytes.byteLength < 32 * 1024 * 1024)
   const catalog = JSON.parse(await readFile(join(dist, 'catalog.json'), 'utf8'))
@@ -684,7 +684,7 @@ test('the built plugin serves the editor with same-origin MIME, CSP, and travers
   const home = join(temp, 'home')
   const extracted = join(temp, 'package')
   await mkdir(extracted, { recursive: true })
-  const archive = join(dist, 'packages', 'capability-center-drawio-0.1.8.tgz')
+  const archive = join(dist, 'packages', 'capability-center-drawio-0.2.0.tgz')
   await runFile('tar', ['-xzf', archive, '-C', extracted])
   const oldHome = process.env.DSH_HOME
   process.env.DSH_HOME = home

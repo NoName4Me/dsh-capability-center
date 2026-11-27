@@ -43,7 +43,7 @@ test('packaged OCR recognizes the bilingual fixture using its local runtime', as
   const temp = await tempRoot('capability-center-ocr-')
   try {
     await runFile(python, [
-      '-m', 'tarfile', '-e', join(dist, 'packages', 'capability-center-ocr-0.1.0.tgz'), temp,
+      '-m', 'tarfile', '-e', join(dist, 'packages', 'capability-center-ocr-0.2.0-offline.1.tgz'), temp,
     ])
     const bundle = join(temp, 'package')
     const { stdout } = await runFile(process.execPath, [
@@ -73,14 +73,14 @@ test('offline archive is complete, contains current release metadata, and landin
     'capability-center/index.html',
     'capability-center/start-server.py',
     'capability-center/start-server.cmd',
-    'capability-center/packages/capability-center-0.2.12.tgz',
-    'capability-center/packages/capability-center-drawio-0.1.8.tgz',
-    'capability-center/packages/capability-center-ocr-0.1.0.tgz',
+    'capability-center/packages/capability-center-0.3.0.tgz',
+    'capability-center/packages/capability-center-drawio-0.2.0.tgz',
+    'capability-center/packages/capability-center-ocr-0.2.0-offline.1.tgz',
     'capability-center/packages/changfenhuang-dsh-genui-0.16.0.tgz',
-    'capability-center/packages/dsh-intranet-auto-continue-1.1.0.tgz',
+    'capability-center/packages/dsh-intranet-auto-continue-1.2.0.tgz',
     'capability-center/packages/office-enhancement-skill-1.0.0.zip',
     'capability-center/packages/pypdf-7.1.0-py3-none-any.whl',
-    'capability-center/core/capability-center-core-0.2.12.zip',
+    'capability-center/core/capability-center-core-0.3.0.zip',
   ]) {
     assert.ok(names.includes(required), `offline archive is missing ${required}`)
   }
@@ -98,11 +98,11 @@ test('offline archive is complete, contains current release metadata, and landin
   const manifest = JSON.parse(
     archive.get('capability-center/artifact-manifest.json').toString('utf8'),
   )
-  assert.equal(manifest.artifacts.bootstrap.path, 'packages/capability-center-0.2.12.tgz')
+  assert.equal(manifest.artifacts.bootstrap.path, 'packages/capability-center-0.3.0.tgz')
   const registry = JSON.parse(archive.get('capability-center/publication-registry.json').toString('utf8'))
-  assert.equal(registry.entries['core@0.2.12'].kind, 'core')
-  assert.equal(registry.entries['dsh-intranet-auto-continue@1.1.0'].type, 'plugin')
-  assert.equal(registry.entries['capability-center-drawio@0.1.8'].type, 'plugin')
+  assert.equal(registry.entries['core@0.3.0'].kind, 'core')
+  assert.equal(registry.entries['dsh-intranet-auto-continue@1.2.0'].type, 'plugin')
+  assert.equal(registry.entries['capability-center-drawio@0.2.0'].type, 'plugin')
   assert.equal(registry.entries['dsh-genui@0.16.0'].type, 'plugin')
   assert.equal(registry.entries['office-enhancement@1.0.0'].type, 'composite')
   assert.equal(registry.entries['python-pypdf@7.1.0'].type, 'python')

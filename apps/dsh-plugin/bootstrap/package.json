@@ -1,6 +1,6 @@
 {
   "name": "capability-center",
-  "version": "0.2.12",
+  "version": "0.3.0",
   "description": "Intranet capability center for DSH skills, plugins, Python packages, and composites",
   "type": "module",
   "main": "index.js",

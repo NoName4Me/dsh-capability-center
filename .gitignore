@@ -20,3 +20,7 @@ Desktop.ini
 # Private registry development
 .admin-data/
 .env.local
+
+/dist-independent/
+/.build-independent/
+/.admin-data/

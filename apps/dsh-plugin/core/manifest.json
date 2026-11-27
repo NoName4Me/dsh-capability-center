@@ -1,12 +1,19 @@
 {
   "schemaVersion": 1,
   "name": "capability-center-core",
-  "version": "0.2.12",
+  "version": "0.3.0",
   "protocolVersion": 1,
   "entry": "engine/index.js",
   "compatibility": {
     "dsh": "0.2.1-rc.2",
-    "os": ["win32", "darwin", "linux"],
-    "arch": ["x64", "arm64"]
+    "os": [
+      "win32",
+      "darwin",
+      "linux"
+    ],
+    "arch": [
+      "x64",
+      "arm64"
+    ]
   }
 }

@@ -1,13 +1,59 @@
 {
   "name": "capability-center-ocr",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Offline Chinese and English image OCR for DSH",
   "type": "module",
   "main": "plugin.js",
-  "files": ["plugin.js", "ocr.js", "worker.js", "cli.js", "SKILL.md", "cordis.patch.yml", "fixture.png", "tessdata", "runtime-provenance.json"],
-  "engines": { "dsh": ">=0.2.1-rc.2 <0.2.3", "node": ">=22" },
-  "dependencies": { "tesseract.js": "7.0.0", "image-size": "2.0.2" },
-  "bundleDependencies": ["tesseract.js", "image-size"],
-  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
-  "license": "MIT"
+  "files": [
+    "plugin.js",
+    "ocr.js",
+    "worker.js",
+    "cli.js",
+    "SKILL.md",
+    "cordis.patch.yml",
+    "fixture.png",
+    "tessdata",
+    "runtime-provenance.json"
+  ],
+  "engines": {
+    "dsh": ">=0.2.1-rc.2 <0.2.3",
+    "node": ">=22"
+  },
+  "dependencies": {
+    "tesseract.js": "7.0.0",
+    "image-size": "2.0.2"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "license": "MIT",
+  "capability": {
+    "title": "离线文字识别",
+    "description": "在本机识别简体中文及英文图片文字，扫描 PDF 可逐页渲染后识别。",
+    "checks": [
+      {
+        "type": "named-tool-readonly-call",
+        "tool": "offline_ocr_check"
+      }
+    ],
+    "usage": {
+      "steps": [
+        "安装后在 DSH 对话中提供本地图片。",
+        "使用 offline-ocr 技能获取识别结果。"
+      ],
+      "inputs": "PNG、JPEG 或 PDF 页面",
+      "output": "UTF-8 文本及可选坐标",
+      "example": "识别本地截图并输出文字。"
+    },
+    "os": [
+      "win32",
+      "darwin"
+    ],
+    "arch": [
+      "x64",
+      "arm64"
+    ]
+  }
 }

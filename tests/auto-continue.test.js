@@ -27,7 +27,7 @@ import {
 
 const AUTO_ID = 'dsh-intranet-auto-continue'
 const AUTO_NAME = 'dsh-intranet-auto-continue'
-const AUTO_VERSION = '1.1.0'
+const AUTO_VERSION = '1.2.0'
 const AUTO_ENTRY_ID = 'include:dsh-intranet-auto-continue'
 
 function bundleInfo(overrides = {}) {
@@ -48,7 +48,7 @@ function bundleInfo(overrides = {}) {
 
 function serviceFor(home, context) {
   return new CoreService(context, {
-    version: '0.2.12',
+    version: '0.3.0',
     dataRoot: join(home, 'capability-center'),
     http: { readBoundedUrl },
     dshHome: home,
@@ -911,10 +911,10 @@ test('offline package, artifact manifest and ZIP distribute the catalog plugin T
   assert.equal(sha256(archive.get(offlinePath)), artifactManifest.artifacts.autoContinue.sha256)
 
   const bootstrap = readTarGz(await readFile(
-    join(dist, 'packages', 'capability-center-0.2.12.tgz'),
+    join(dist, 'packages', 'capability-center-0.3.0.tgz'),
   ))
   const bootstrapManifest = JSON.parse(bootstrap.get('package/package.json').toString('utf8'))
-  assert.equal(bootstrapManifest.version, '0.2.12')
+  assert.equal(bootstrapManifest.version, '0.3.0')
   assert.equal(bootstrapManifest.engines.dsh, '>=0.2.1-rc.2 <0.2.3')
   for (const version of ['0.2.1-rc.2', '0.2.1-rc.5', '0.2.2-rc.1', '0.2.2-rc.2']) {
     assert.equal(satisfies(version, bootstrapManifest.engines.dsh), true, version)

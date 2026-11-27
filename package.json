@@ -1,6 +1,6 @@
 {
   "name": "capability-center-workspace",
-  "version": "0.2.12",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -14,7 +14,8 @@
     "dev:admin": "node --watch apps/admin/server.js",
     "start:admin": "node apps/admin/server.js",
     "test:registry": "node --test packages/protocol/test.js apps/admin/test.js tests/catalog-sync.test.js tests/runtime.test.js",
-    "capability:validate": "node packages/capability-sdk/cli.js validate"
+    "capability:validate": "node packages/capability-sdk/cli.js validate",
+    "pack:target": "node build.mjs --target"
   },
   "engines": {
     "node": ">=22"
