@@ -45,9 +45,9 @@ tests/
 docs/
 ```
 
-目录为目标布局，不代表已经移动。bootstrap 与 core 可在同一终端应用目录内独立构建；协议包只含纯数据及通用校验，不依赖 DSH、数据库或浏览器。SDK 是开发期工具，不是官方能力运行时必须依赖的中心 API。每个可发布包独立 SemVer，目录 revision 单独递增，管理端独立部署版本；发布一项能力不发布终端、管理端或其他能力。workspace:* 只用于开发，发布时必须转换为可解析版本或编译内联；私服验收必须使用真正发布的包而非 workspace 链接。
+主要目录已迁移至 Monorepo；integrations 独立目录与集成测试分类仍可按后续需要细化。bootstrap 与 core 可在同一终端应用目录内独立构建；协议包只含纯数据及通用校验，不依赖 DSH、数据库或浏览器。SDK 是开发期工具，不是官方能力运行时必须依赖的中心 API。每个可发布包独立 SemVer，目录 revision 单独递增，管理端独立部署版本；发布一项能力不发布终端、管理端或其他能力。workspace:* 只用于开发，发布时必须转换为可解析版本或编译内联；私服验收必须使用真正发布的包而非 workspace 链接。
 
-管理端初步建议 TypeScript + Fastify + React/Vite（单进程提供静态页面和 API），SQLite（本机持久目录、事务及备份）作为单实例起步方案；有企业现成 PostgreSQL 或多实例需求则选 PostgreSQL，先不引入 Redis、队列或微服务。此为技术默认值，待实现时可按基础设施调整；管理端不要求部署在 DSH 终端。
+管理端初步建议 TypeScript + Fastify + React/Vite（单进程提供静态页面和 API），SQLite（本机持久目录、事务及备份）作为单实例起步方案；有企业现成 PostgreSQL 或多实例需求则选 PostgreSQL，先不引入 Redis、队列或微服务。0.3.0 实际实现先采用 Node.js 原生 HTTP、node:sqlite 和原生 Web UI，无额外前端/服务端运行依赖；是否引入 Fastify/React 取决于管理能力规模。管理端不要求部署在 DSH 终端。
 
 ## 3. 私服与信任边界
 

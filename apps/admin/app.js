@@ -27,6 +27,6 @@ async function refresh(){
   $('audit').replaceChildren(...result.audit.map(x=>element('p',x.at+' · '+x.action+' · '+x.id+'@'+x.version)))
 }
 $('login').onsubmit=async e=>{e.preventDefault();token=$('token').value;$('token').value='';try{await refresh();status('已连接')}catch(e){status(e.message)}}
-$('import').onsubmit=async e=>{e.preventDefault();try{await api('import',{packageName:$('name').value.trim(),version:$('version').value.trim()});await refresh();status('已导入草稿，请核对后发布')}catch(e){status(e.message)}}
+$('import').onsubmit=async e=>{e.preventDefault();try{await api('import',{packageName:$('name').value.trim(),version:$('version').value.trim(),overlay:{...($('overlay-id').value.trim()?{id:$('overlay-id').value.trim()}:{}),...($('overlay-title').value.trim()?{title:$('overlay-title').value.trim()}:{})}});await refresh();status('已导入草稿，请核对后发布')}catch(e){status(e.message)}}
 
 $('import-raw').onsubmit=async e=>{e.preventDefault();try{await api('import-raw',{descriptorPath:$('raw-path').value.trim()});await refresh();status('已导入 Skill 草稿')}catch(e){status(e.message)}}
