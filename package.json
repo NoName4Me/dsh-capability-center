@@ -15,7 +15,8 @@
     "start:admin": "node apps/admin/server.js",
     "test:registry": "node --test packages/protocol/test.js apps/admin/test.js tests/catalog-sync.test.js tests/runtime.test.js",
     "capability:validate": "node packages/capability-sdk/cli.js validate",
-    "pack:target": "node build.mjs --target"
+    "pack:target": "node build.mjs --target",
+    "test:packages": "node --test packages/protocol/test.js apps/admin/test.js tests/catalog-sync.test.js tests/runtime.test.js"
   },
   "engines": {
     "node": ">=22"

@@ -435,7 +435,7 @@ export class CoreService {
       const current = await this.installedBundle(intent.packageName)
       if (current?.installed === true && current.version === intent.beforeVersion) return
       if (current?.installed === true) await this.removePluginForRecovery(intent.packageName)
-      const restored = await manager.installBundle(intent.beforeArchive, this.pluginInstallOptions(intent.registryRequired))
+      const restored = await manager.installBundle(intent.beforeArchive, this.pluginInstallOptions())
       if (!['applied', 'restart-required', 'overridden'].includes(restored?.application)) {
         throw new CapabilityError(
           'recovery-install-failed',
@@ -679,10 +679,9 @@ export class CoreService {
     return await this.catalogSync.refresh(serverUrl,{force})
   }
 
-  pluginInstallOptions(required, enabled) {
-    const value=process.env.DSH_NPM_REGISTRY
-    if(required && !value) throw new CapabilityError('registry-required','请配置内网 npm 私服 DSH_NPM_REGISTRY。')
-    return {saveExact:true,...(enabled===undefined?{}:{enabled}),...(value?{registry:normalizeServerUrl(value)}:{})}
+  pluginInstallOptions(enabled) {
+    // Do not resolve missing dependencies against any network registry.
+    return {saveExact:true,offline:true,registry:'http://127.0.0.1:9/',...(enabled===undefined?{}:{enabled})}
   }
 
   mergedCatalog(online) {
@@ -875,8 +874,6 @@ export class CoreService {
     this.transition(operation, 'running', '检查安装环境', { progress: 0.08 })
     const pythonRuntime = needsPython ? await this.workspaceDependencies() : undefined
     for (const [index, item] of plan.order.entries()) {
-      if (item.type === 'plugin') this.pluginInstallOptions(item.install?.registryRequired, true)
-      if(item.runtime?.python&&!process.env.DSH_PYPI_INDEX)throw new CapabilityError('registry-required','请配置 DSH_PYPI_INDEX 内网 Python 私服。')
       const incompatibility = compatibilityError(item, { pythonVersion: pythonRuntime?.version })
       if (incompatibility !== undefined) {
         throw new CapabilityError('incompatible-capability', `${item.name} 不兼容：${incompatibility}`)
@@ -1216,7 +1213,6 @@ export class CoreService {
             beforeVersion: existing.version,
             targetVersion: item.version,
             beforeArchive: existing.artifacts[0],
-            registryRequired: existing.manifest.install?.registryRequired === true,
           })
           await this.ledger.addStep(operation.id, { step: 'plugin-remove-before-update', itemId: item.id })
           const removed = await manager.removeBundle(existing.manifest.install.packageName)
@@ -1420,7 +1416,7 @@ export class CoreService {
         targetVersion: item.version,
         beforeVersion: old?.version ?? null,
       })
-      const result = await manager.installBundle(artifact, this.pluginInstallOptions(item.install.registryRequired, true))
+      const result = await manager.installBundle(artifact, this.pluginInstallOptions(true))
       if (!['applied', 'restart-required', 'overridden'].includes(result?.application)) {
         throw new CapabilityError('plugin-install-failed',
           `插件安装失败：${result?.error?.diagnostic ?? result?.application ?? '无结果'}`)
@@ -1466,6 +1462,10 @@ export class CoreService {
       return await this.checkPypdf(item, entry)
     }
     for (const check of item.checks) {
+      if(check.type==='dependencies-ready'){
+        for(const dep of item.dependencies??[]){const child=this.ledger.get(dep.id);if(!child||child.version!==dep.version||!['ready','restart-required'].includes(child.latestHealth?.status))return {status:'failed',detail:'组合依赖未就绪：'+dep.id};if(child.latestHealth.status==='restart-required')return {status:'restart-required',detail:'组合依赖等待重启：'+dep.id}}
+        continue
+      }
       if (check.type === 'office-smoke') {
         const health = await this.checkOfficeSmoke(item)
         if (health.status !== 'ready') return health
@@ -2125,7 +2125,6 @@ export class CoreService {
         packageName: item.install.packageName,
         beforeVersion: entry.version,
         beforeArchive: entry.artifacts[0],
-        registryRequired: entry.manifest.install?.registryRequired === true,
       })
       const result = await manager.removeBundle(item.install.packageName)
       if (!['applied', 'restart-required'].includes(result?.application)) {

@@ -10,6 +10,7 @@ export class Store {
   constructor(root,{privateKey}={}) {
     this.root=root; this.privateKey=privateKey
     mkdirSync(join(root,'packages'),{recursive:true})
+    mkdirSync(join(root,'uploads'),{recursive:true})
     this.db=new DatabaseSync(join(root,'catalog.sqlite'))
     this.db.exec("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS versions(id TEXT, version TEXT, item TEXT NOT NULL, state TEXT NOT NULL, created TEXT NOT NULL, first_published TEXT, published TEXT, PRIMARY KEY(id,version)); CREATE TABLE IF NOT EXISTS audit(seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, action TEXT NOT NULL, id TEXT NOT NULL, version TEXT NOT NULL); CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value INTEGER NOT NULL); INSERT OR IGNORE INTO meta VALUES('revision',0);")
   }
@@ -19,10 +20,11 @@ export class Store {
     try{const out=fn();this.db.exec('COMMIT');return out}catch(e){this.db.exec('ROLLBACK');throw e}
   }
   audit(action,id,version){this.db.prepare('INSERT INTO audit(at,action,id,version) VALUES(?,?,?,?)').run(new Date().toISOString(),action,id,version)}
-  stage({item,body,blobs=[]}){
-    validateCatalog({schemaVersion:2,items:[item]},'https://catalog.invalid/')
-    if(!['plugin','skill'].includes(item.type))throw new Error('不支持的制品类型')
-    const expected=[item.artifact,...(item.runtime?.assets??[])]
+  stage({item,body,blobs=[],upload}){
+    if(item.type!=='core')validateCatalog({schemaVersion:2,items:[item]},'https://catalog.invalid/')
+    if(!['plugin','skill','composite','core'].includes(item.type))throw new Error('不支持的制品类型')
+    if(upload){const path=join(this.root,'uploads',sha256(upload)+'.zip');if(!existsSync(path))writeFileSync(path,upload,{flag:'wx',mode:0o600})}
+    const expected=[item.artifact,...(item.runtime?.assets??[])].filter(Boolean)
     for(const a of expected){
       const bytes=a===item.artifact?body:blobs.find(b=>b.path===a.path)?.body
       if(!bytes||a.sha256!==sha256(bytes)||a.bytes!==bytes.length||!['tgz','zip','bin'].some(ext=>a.path==='packages/'+a.sha256+'.'+ext))throw new Error('制品摘要或路径错误')
@@ -56,7 +58,7 @@ export class Store {
       const first=this.db.prepare('SELECT MIN(first_published) AS first FROM versions WHERE id=?').get(id).first
       if(action==='publish'){
         const item=JSON.parse(row.item)
-        for(const a of [item.artifact,...(item.runtime?.assets??[])])if(sha256(readFileSync(join(this.root,a.path)))!==a.sha256)throw new Error('制品丢失或损坏')
+        for(const a of [item.artifact,...(item.runtime?.assets??[])].filter(Boolean))if(sha256(readFileSync(join(this.root,a.path)))!==a.sha256)throw new Error('制品丢失或损坏')
         this.db.prepare('UPDATE versions SET state=?,first_published=?,published=? WHERE id=? AND version=?').run(state,first??now,now,id,version)
       }else this.db.prepare('UPDATE versions SET state=? WHERE id=? AND version=?').run(state,id,version)
       this.db.prepare("UPDATE meta SET value=value+1 WHERE key='revision'").run()
@@ -69,18 +71,26 @@ export class Store {
   auditList(){return this.db.prepare('SELECT * FROM audit ORDER BY seq DESC LIMIT 200').all()}
   catalog(){
     const rows=this.db.prepare("SELECT * FROM versions WHERE state='published'").all()
-    const all=rows.map(row=>({...JSON.parse(row.item),firstPublishedAt:row.first_published,publishedAt:row.published}))
+    const all=rows.map(row=>({...JSON.parse(row.item),firstPublishedAt:row.first_published,publishedAt:row.published})).filter(item=>item.type!=='core')
     const latest=new Map()
     for(const item of all)if(!latest.has(item.id)||compareVersions(item.version,latest.get(item.id).version)>0)latest.set(item.id,item)
     const items=[...latest.values()].sort((a,b)=>a.id.localeCompare(b.id))
-    validateGraph(validateCatalog({schemaVersion:2,items},'https://catalog.invalid/'))
+    validateGraph(validateCatalog({schemaVersion:2,items,versions:all},'https://catalog.invalid/'))
     return signedCatalog({schemaVersion:2,name:'内网能力目录',generatedFor:'dsh-v0.2.1-rc.2',revision:this.db.prepare("SELECT value FROM meta WHERE key='revision'").get().value,items,versions:all.sort((a,b)=>a.id.localeCompare(b.id)||compareVersions(b.version,a.version)),revocations:this.db.prepare("SELECT id,version FROM versions WHERE state='revoked' ORDER BY id,version").all()},this.privateKey)
+  }
+  coreIndex(){
+    const releases=this.list().filter(r=>r.state==='published'&&r.item.type==='core').map(({item})=>({version:item.version,archive:'core/capability-center-core-'+item.version+'.zip',sha256:item.artifact.sha256,bytes:item.artifact.bytes,compatibility:item.compatibility})).sort((a,b)=>compareVersions(b.version,a.version))
+    return signedCatalog({schemaVersion:1,protocolVersion:1,releases},this.privateKey)
+  }
+  coreArtifact(path){
+    const release=this.coreIndex().releases.find(v=>'/'+v.archive===path)
+    return release?this.artifact(release.sha256,'zip'):undefined
   }
   artifact(digest,extension='tgz'){
     if(!SHA256.test(digest)||!['tgz','zip','bin'].includes(extension))return undefined
     const path='packages/'+digest+'.'+extension
     const rows=this.db.prepare('SELECT item,state FROM versions WHERE published IS NOT NULL').all()
-    if(!rows.some(r=>{const item=JSON.parse(r.item);return r.state!=='revoked'&&[item.artifact,...(item.runtime?.assets??[])].some(a=>a.path===path)}))return undefined
+    if(!rows.some(r=>{const item=JSON.parse(r.item);return r.state!=='revoked'&&[item.artifact,...(item.runtime?.assets??[])].filter(Boolean).some(a=>a.path===path)}))return undefined
     const bytes=readFileSync(join(this.root,path))
     if(sha256(bytes)!==digest)throw new Error('制品摘要错误')
     return bytes

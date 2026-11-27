@@ -13,8 +13,8 @@ async function refresh(){
   $('versions').replaceChildren()
   for(const v of result.versions){
     const row=element('div','');row.className='row'
-    const info=element('div','');info.append(element('strong',v.item.name+' · '+v.version),element('p',(v.item.install?.packageName??'Skill ZIP')+' / '+v.state))
-    row.append(info)
+    const info=element('div','');info.append(element('strong',v.item.name+' · '+v.version),element('p',(v.item.install?.packageName??({skill:'Skill',composite:'组合能力',core:'核心更新'}[v.item.type]??v.item.type))+' / '+v.state))
+    const details=element('details','');details.append(element('summary','查看声明'),element('pre',JSON.stringify(v.item,null,2)));info.append(details);row.append(info)
     const actions={draft:['publish'],published:['delist','revoke'],delisted:['publish','revoke'],revoked:[]}[v.state]??[]
     for(const action of actions){
       const button=element('button',{publish:'发布',delist:'下架',revoke:'安全撤回'}[action])
@@ -27,6 +27,12 @@ async function refresh(){
   $('audit').replaceChildren(...result.audit.map(x=>element('p',x.at+' · '+x.action+' · '+x.id+'@'+x.version)))
 }
 $('login').onsubmit=async e=>{e.preventDefault();token=$('token').value;$('token').value='';try{await refresh();status('已连接')}catch(e){status(e.message)}}
-$('import').onsubmit=async e=>{e.preventDefault();try{await api('import',{packageName:$('name').value.trim(),version:$('version').value.trim(),overlay:{...($('overlay-id').value.trim()?{id:$('overlay-id').value.trim()}:{}),...($('overlay-title').value.trim()?{title:$('overlay-title').value.trim()}:{})}});await refresh();status('已导入草稿，请核对后发布')}catch(e){status(e.message)}}
-
-$('import-raw').onsubmit=async e=>{e.preventDefault();try{await api('import-raw',{descriptorPath:$('raw-path').value.trim()});await refresh();status('已导入 Skill 草稿')}catch(e){status(e.message)}}
+$('upload').onsubmit=async e=>{
+  e.preventDefault();const file=$('file').files[0];if(!file)return
+  const button=e.target.querySelector('button');button.disabled=true
+  try{status('正在上传并校验 '+file.name)
+    const response=await fetch('/api/admin/upload',{method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/zip'},body:file})
+    const value=await response.json();if(!response.ok)throw Error(value.error??'上传失败')
+    await refresh();$('file').value='';status('已上传 '+value.id+'@'+value.version+'，请核对后发布')
+  }catch(error){status(error.message)}finally{button.disabled=false}
+}

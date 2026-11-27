@@ -54,6 +54,7 @@ function validCompatibility(value) {
 
 function validCheck(value) {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  if (value.type === 'dependencies-ready') return Object.keys(value).length === 1
   if (value.type === 'office-smoke') return Object.keys(value).length === 1
   if (value.type === 'plugin-bundle') return Object.keys(value).length === 1
   if (value.type === 'skill-discovery') return value.name === undefined || ID.test(value.name)
@@ -109,6 +110,7 @@ export function validateRuntime(value, base) {
     if(url.origin!==new URL(base).origin||!url.pathname.startsWith(new URL(base).pathname))throw new CapabilityError('invalid-runtime','资源必须来自目录发布源。')
     return {name:a.name,path:a.path,sha256:a.sha256,bytes:a.bytes,format:a.format,url:url.href}
   })
+  if(python&&!normalized.some(a=>a.name==='wheelhouse'&&a.format==='zip'))throw new CapabilityError('invalid-runtime','Python 依赖必须包含 wheelhouse ZIP。')
   if(!python&&!normalized.length)throw new CapabilityError('invalid-runtime','运行依赖不能为空。')
   return {...(python?{python}:{}),assets:normalized}
 }
@@ -146,6 +148,7 @@ function validateItem(item, index, base) {
       throw new CapabilityError('invalid-catalog', `能力 ${item.id} 的制品声明无效。`)
     }
   }
+  if (item.checks.some(check => check.type === 'dependencies-ready') && item.type !== 'composite') throw new CapabilityError('invalid-catalog','组合检查只能用于组合能力。')
   if (item.checks.some(check => check.type === 'office-smoke')
     && (item.id !== 'office-enhancement' || item.type !== 'composite')) {
     throw new CapabilityError(
@@ -162,7 +165,7 @@ function validateItem(item, index, base) {
   if (item.type === 'plugin') {
     if (typeof item.install?.packageName !== 'string'
       || !PACKAGE_NAME.test(item.install.packageName)
-      || (item.install.registryRequired !== undefined && typeof item.install.registryRequired !== 'boolean')) {
+      || item.install.registryRequired === true) {
       throw new CapabilityError('invalid-catalog', `插件 ${item.id} 缺少固定 packageName。`)
     }
   }
@@ -212,6 +215,7 @@ export function validateCatalog(value, base) {
     throw new CapabilityError('invalid-catalog', '目录修订号无效。')
   }
   const ids = new Set()
+  let versions
   let items = value.items.map((item, index) => {
     if (ids.has(item?.id)) throw new CapabilityError('invalid-catalog', `能力 ID 重复：${item.id}`)
     ids.add(item?.id)
@@ -228,6 +232,7 @@ export function validateCatalog(value, base) {
       if (list.some(v => v.version === item.version || v.install?.packageName !== item.install?.packageName)) throw new CapabilityError('invalid-catalog','版本身份重复或不一致。')
       list.push(item); groups.set(item.id,list)
     }
+    versions = [...groups.values()].flat()
     items = items.map(item => {
       const list=groups.get(item.id)
       if (!list?.some(v=>v.version===item.version)) throw new CapabilityError('invalid-catalog','目录版本缺失。')
@@ -240,7 +245,7 @@ export function validateCatalog(value, base) {
   if (!Array.isArray(revocations) || revocations.length>1000 || !revocations.every(v=>v && ID.test(v.id) && VERSION.test(v.version))) {
     throw new CapabilityError('invalid-catalog','撤回列表无效。')
   }
-  if (items.some(item=>revocations.some(v=>v.id===item.id&&v.version===item.version))) throw new CapabilityError('invalid-catalog','撤回版本不能上架。')
+  if ((versions??items).some(item=>revocations.some(v=>v.id===item.id&&v.version===item.version))) throw new CapabilityError('invalid-catalog','撤回版本不能上架。')
   return Object.freeze({
     schemaVersion: CATALOG_SCHEMA_VERSION,
     revision: value.revision,
@@ -248,6 +253,7 @@ export function validateCatalog(value, base) {
     name: typeof value.name === 'string' ? value.name.slice(0, 120) : '内网能力目录',
     generatedFor: typeof value.generatedFor === 'string' ? value.generatedFor : 'dsh-v0.2.1-rc.2',
     items: Object.freeze(items),
+    ...(versions?{versions:Object.freeze(versions)}:{}),
   })
 }
 

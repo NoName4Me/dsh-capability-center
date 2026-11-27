@@ -19,7 +19,8 @@ export function planCapabilities(catalog, rootId) {
     }
     visiting.push(item.id)
     for (const dependency of item.dependencies ?? []) {
-      const child = byId.get(dependency.id)
+      const current = byId.get(dependency.id)
+      const child = current?.version===dependency.version?current:(catalog.versions?.find(v=>v.id===dependency.id&&v.version===dependency.version)??current)
       if (child === undefined) {
         throw new CapabilityError(
           'missing-dependency',

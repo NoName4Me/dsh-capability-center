@@ -41,12 +41,12 @@ export function pluginDescriptor(manifest, overlay = {}) {
   const description = meta.description ?? manifest.description
   if (!ID.test(id) || typeof name !== 'string' || !name.trim() || typeof description !== 'string' || !description.trim()) throw new Error('缺少能力元数据')
   if (meta.version !== undefined && meta.version !== manifest.version) throw new Error('声明版本与 npm 包不一致')
-  // First registry release supports native Bundles only. Complex installation declarations fail closed.
+  // Native Bundle metadata; all third-party dependencies must be bundled.
   if (meta.components?.length || meta.dependencies?.length) throw new Error('该能力需要尚未支持的跨能力组合声明')
   const runtime=meta.runtime??((meta.python||meta.assets?.length)?{...(meta.python?{python:meta.python}:{}),assets:meta.assets??[]}:undefined)
   const usage = meta.usage ?? {steps:['安装并确认能力已激活。','按插件说明在 DSH 中使用。'],inputs:'按插件说明提供输入。',output:'由能力提供。',example:'查看插件说明。'}
   return {id, type:'plugin', name, version:manifest.version, description, compatibility:{dsh:manifest.engines.dsh,...(meta.os ? {os:meta.os}:{}),...(meta.arch ? {arch:meta.arch}:{})},
-    install:{packageName:manifest.name,registryRequired:true}, checks:[{type:'plugin-bundle'},...(Array.isArray(meta.checks)?meta.checks.filter(c=>c.type==='named-tool-readonly-call'):[])], dependencies:[], usage,
+    install:{packageName:manifest.name}, checks:[{type:'plugin-bundle'},...(Array.isArray(meta.checks)?meta.checks.filter(c=>c.type==='named-tool-readonly-call'):[])], dependencies:[], usage,
     ...(runtime?{runtime}:{}),
     trial:{prompt:meta.trial?.prompt ?? '请介绍已安装能力 '+name+' 的使用方法。'},
     ...(meta.category==='mcp'?{category:'mcp'}:{}),

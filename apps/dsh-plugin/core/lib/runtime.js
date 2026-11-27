@@ -7,7 +7,6 @@ import { join, dirname, resolve, sep } from 'node:path'
 import { readZip, safeRelativePath } from './archive.js'
 import { atomicWriteJson, readJson } from './atomic.js'
 import { verifyOwnedFiles } from './installers.js'
-import { normalizeServerUrl } from './manifest.js'
 import { canonical } from './signature.js'
 
 const run=promisify(execFile)
@@ -29,7 +28,7 @@ function env(){
 }
 async function execute(python,args,timeout=180000){
  try{return await run(python,args,{timeout,maxBuffer:1024*1024,encoding:'utf8',windowsHide:true,env:env()})}
- catch(e){throw Error('Python 环境操作失败（退出 '+String(e.code??'unknown')+'），请检查私服、wheel 及解释器兼容性。')}
+ catch(e){throw Error('Python 环境操作失败（退出 '+String(e.code??'unknown')+'），请检查离线 wheel 及解释器兼容性。')}
 }
 const descriptor=runtime=>({...runtime,assets:(runtime.assets??[]).map(({url,...a})=>a)})
 function assetPath(path){
@@ -83,7 +82,7 @@ export async function prepareRuntime({root,item,operationId,http,basePython,befo
    if(body.length!==a.bytes||hash(body)!==a.sha256)throw Error('资源摘要错误：'+a.name)
    const target=join(directory,'assets',a.name)
    await mkdir(target,{recursive:true})
-   const entries=a.format==='zip'?readZip(body):new Map([['resource.bin',body]])
+   const entries=a.format==='zip'?readZip(body,{maxFileBytes:32*1024*1024,maxUnpackedBytes:128*1024*1024,maxFiles:2048}):new Map([['resource.bin',body]])
    const paths=new Set()
    for(const [path,bytes] of entries){
      if(!assetPath(path)||paths.has(path.toLowerCase()))throw Error('不安全或重复资源路径')
@@ -97,16 +96,14 @@ export async function prepareRuntime({root,item,operationId,http,basePython,befo
  let python=null
  if(item.runtime.python){
    if(!basePython?.python||!basePython?.version)throw Error('DSH Python 不可用')
-   const index=process.env.DSH_PYPI_INDEX
-   if(!index)throw Error('请配置 DSH_PYPI_INDEX 内网 Python 私服')
-   const registry=normalizeServerUrl(index)
+   if(!assets.wheelhouse)throw Error('离线能力包缺少 wheelhouse')
    await execute(basePython.python,['-I','-m','venv',...(item.runtime.python.inheritBuiltin?['--system-site-packages']:[]),join(directory,'venv')])
    python=join(directory,'venv',...(process.platform==='win32'?['Scripts','python.exe']:['bin','python']))
    const lock=join(directory,'requirements.lock')
    const content=item.runtime.python.requirements.map(r=>r.name+'=='+r.version+' '+r.hashes.map(h=>'--hash=sha256:'+h).join(' ')).join('\n')+'\n'
    await writeFile(lock,content,{flag:'wx'})
    files.push({path:'requirements.lock',sha256:hash(content),bytes:Buffer.byteLength(content)})
-   await execute(python,['-I','-m','pip','install','--disable-pip-version-check','--no-input','--no-cache-dir','--index-url',registry,'--only-binary=:all:','--require-hashes','--no-deps','--ignore-installed','-r',lock])
+   await execute(python,['-I','-m','pip','install','--disable-pip-version-check','--no-input','--no-cache-dir','--no-index','--find-links',assets.wheelhouse,'--only-binary=:all:','--require-hashes','--no-deps','--ignore-installed','-r',lock])
  }
  const record={id:item.id,version:item.version,operationId,directory,python,assets,files,basePython:basePython?.python??null,baseVersion:basePython?.version??null,fingerprint:hash(canonical(descriptor(item.runtime)))}
  await atomicWriteJson(join(directory,'runtime.json'),record)
