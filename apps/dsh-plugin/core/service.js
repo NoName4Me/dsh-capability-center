@@ -25,6 +25,7 @@ import {
 import { compareVersions } from './lib/semver.js'
 import { LocalLedger } from './lib/ledger.js'
 import { CatalogSync } from './lib/catalog-sync.js'
+import { prepareRuntime, verifyRuntime, removeRuntime } from './lib/runtime.js'
 import {
   downloadArtifact,
   installPython,
@@ -398,6 +399,7 @@ export class CoreService {
   }
 
   async recoverIntent(intent) {
+    if(intent.kind==='runtime-create'){await removeRuntime(this.dataRoot,intent);return}
     if (intent.kind === 'skill') {
       await rollbackSkill(intent)
       return
@@ -629,7 +631,7 @@ export class CoreService {
     const disposer = registry.register({
       name: entry.id,
       description: parsed.description,
-      content: parsed.content,
+      content: parsed.content + (entry.auxRuntime?.python ? '\n\n能力专用 Python 解释器：'+JSON.stringify(entry.auxRuntime.python) : '') + (entry.auxRuntime?.assets ? '\n\n能力资源绝对路径：'+JSON.stringify(entry.auxRuntime.assets) : ''),
       path: join(target, 'SKILL.md'),
       source: 'custom',
       provider: 'capability-center',
@@ -869,11 +871,12 @@ export class CoreService {
     const reuse = new Map()
     const externalPypdf = new Map()
     const needsPython = plan.order.some(item => item.type === 'python'
-      || item.compatibility?.python !== undefined)
+      || item.compatibility?.python !== undefined || item.runtime?.python !== undefined)
     this.transition(operation, 'running', '检查安装环境', { progress: 0.08 })
     const pythonRuntime = needsPython ? await this.workspaceDependencies() : undefined
     for (const [index, item] of plan.order.entries()) {
       if (item.type === 'plugin') this.pluginInstallOptions(item.install?.registryRequired, true)
+      if(item.runtime?.python&&!process.env.DSH_PYPI_INDEX)throw new CapabilityError('registry-required','请配置 DSH_PYPI_INDEX 内网 Python 私服。')
       const incompatibility = compatibilityError(item, { pythonVersion: pythonRuntime?.version })
       if (incompatibility !== undefined) {
         throw new CapabilityError('incompatible-capability', `${item.name} 不兼容：${incompatibility}`)
@@ -1199,6 +1202,7 @@ export class CoreService {
         if (existing !== undefined && compareVersions(item.version, existing.version) < 0) {
           throw new CapabilityError('DOWNGRADE_DETECTED', `${item.name} 不允许从 ${existing.version} 降级到 ${item.version}。`)
         }
+        const auxRuntime=await prepareRuntime({root:this.dataRoot,item,operationId:operation.id,http:this.runtime.http,basePython:item.runtime?.python?plan.pythonRuntime:undefined,beforeMutation:intent=>this.ledger.appendIntent(operation.id,intent)})
         if (existing !== undefined && item.type === 'plugin') {
           const manager = this.pluginManager()
           if (typeof existing.artifacts?.[0] !== 'string') {
@@ -1222,7 +1226,7 @@ export class CoreService {
           await this.fault('plugin-removed', { itemId: item.id, version: item.version })
         }
         const installed = await this.installOne(item, plan.artifacts.get(item.id), operation, journal)
-        this.ledger.value.entries[item.id] = installed.entry
+        this.ledger.value.entries[item.id] = {...installed.entry,...(auxRuntime?{auxRuntime}: {})}
         await this.addOwners(item.id, plan.owners[item.id] ?? [], item.id === rootId)
         await this.fault('child-installed', { itemId: item.id, version: item.version })
       }
@@ -1451,6 +1455,9 @@ export class CoreService {
 
   async runChecks(item, entry) {
     if (entry === undefined) return { status: 'failed', detail: '账本中没有该能力' }
+    if(entry.manifest?.runtime){
+      try{await verifyRuntime(this.dataRoot,{...item,runtime:entry.manifest.runtime},entry.auxRuntime)}catch(error){return {status:'failed',detail:messageOf(error)}}
+    }
     if (!Array.isArray(item.checks) || item.checks.length === 0) {
       return { status: 'failed', detail: '本机账本缺少可执行检查声明，已保留安装文件。' }
     }
@@ -1517,7 +1524,7 @@ export class CoreService {
         }
       }
       if (check.type === 'python-import' || check.type === 'python-function') {
-        const runtime = await this.workspaceDependencies()
+        const runtime = entry.auxRuntime?.python?{python:entry.auxRuntime.python}:await this.workspaceDependencies()
         const importResult = await this.pythonImport(runtime, check.module ?? item.install?.module)
         if (check.type === 'python-function') {
           const output = await this.pythonKnownSafe(runtime, check.name)
@@ -1952,6 +1959,7 @@ export class CoreService {
       beforeVersion: entry.version,
     })
     let restartRequired = false
+    const retiredRuntimes=[]
     try {
       for (const current of [...plan].reverse()) {
         const owned = this.ledger.get(current.id)
@@ -1976,6 +1984,7 @@ export class CoreService {
         }
         this.transition(operation, 'running', `卸载 ${current.name}`, { progress: 0.3 })
         const result = await this.uninstallOne(current, owned, operation)
+        if(owned.auxRuntime&&!result.restartRequired)retiredRuntimes.push({itemId:owned.id,version:owned.version,operationId:owned.auxRuntime.operationId})
         if (result.restartRequired) restartRequired = true
         delete this.ledger.value.entries[current.id]
         this.ledger.markMigrationTombstone(current.id, {
@@ -1987,6 +1996,7 @@ export class CoreService {
       }
       await this.ledger.commit(operation.id)
       await this.syncAllSkills()
+      for(const runtime of retiredRuntimes)await removeRuntime(this.dataRoot,runtime).catch(()=>undefined)
       return {
         status: restartRequired ? 'restart-required' : 'ready',
         phase: restartRequired ? '已卸载，等待重启' : '卸载完成',

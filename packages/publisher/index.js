@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto'
 import { gunzipSync } from 'node:zlib'
 import { PACKAGE_NAME, VERSION, registryUrl, pluginDescriptor, sha256 } from '../protocol/index.js'
 import { readBoundedUrl } from '../../apps/dsh-plugin/bootstrap/lib/http-transport.js'
+import { validateRuntime, validateCatalog } from '../../apps/dsh-plugin/core/lib/manifest.js'
+import { readZip, safeRelativePath } from '../../apps/dsh-plugin/core/lib/archive.js'
 
 const MAX = 32*1024*1024
 
@@ -29,7 +31,7 @@ export function readNpmManifest(bytes) {
   return manifest
 }
 
-export async function resolveBundle({registry,packageName,version,overlay,token,read=readBoundedUrl}) {
+export async function resolveBundle({registry,packageName,version,overlay,token,raw,rawToken,read=readBoundedUrl}) {
   if(!PACKAGE_NAME.test(packageName)||!VERSION.test(version)) throw new Error('必须指定合法包名和精确版本')
   const base=registryUrl(registry)
   const headers={accept:'application/json',...(token?{authorization:'Bearer '+token}:{})}
@@ -47,5 +49,43 @@ export async function resolveBundle({registry,packageName,version,overlay,token,
   const item=pluginDescriptor(manifest,overlay)
   const digest=sha256(body)
   item.artifact={path:'packages/'+digest+'.tgz',sha256:digest,bytes:body.length}
-  return {item,body,integrity,dependencies:manifest.dependencies??{}}
+  const blobs=await resolveRuntime(item,{raw,rawToken,read})
+  return {item,body,blobs,integrity,dependencies:manifest.dependencies??{}}
+}
+
+async function rawRead(raw,path,{token,read,maxBytes}){
+  if(!raw||!safeRelativePath(path)||! /^[A-Za-z0-9._/-]+$/.test(path))throw Error('无效 Raw 仓库或路径')
+  const base=registryUrl(raw),url=new URL(path,base)
+  if(url.origin!==base.origin||!url.pathname.startsWith(base.pathname))throw Error('Raw 路径越界')
+  return (await read(url,{maxBytes,timeoutMs:60000,headers:token?{authorization:'Bearer '+token}:{}})).body
+}
+async function resolveRuntime(item,{raw,rawToken,read}){
+  if(!item.runtime)return []
+  const runtime=validateRuntime(item.runtime,raw??'https://raw.invalid/')
+  const blobs=[]
+  for(const a of runtime.assets){
+    const body=await rawRead(raw,a.path,{token:rawToken,read,maxBytes:a.bytes})
+    if(body.length!==a.bytes||sha256(body)!==a.sha256)throw Error('资源摘要不符：'+a.name)
+    if(a.format==='zip')readZip(body)
+    a.path='packages/'+a.sha256+(a.format==='zip'?'.zip':'.bin')
+    delete a.url
+    blobs.push({path:a.path,body})
+  }
+  item.runtime=runtime
+  return blobs
+}
+export async function resolveSkill({raw,rawToken,descriptorPath,read=readBoundedUrl}){
+  const descriptor=JSON.parse((await rawRead(raw,descriptorPath,{token:rawToken,read,maxBytes:1024*1024})).toString('utf8'))
+  if(descriptor.type!=='skill'||!descriptor.artifact||!safeRelativePath(descriptor.artifact.path)||!Number.isSafeInteger(descriptor.artifact.bytes)||descriptor.artifact.bytes<=0||descriptor.artifact.bytes>MAX)throw Error('无效 Skill 发布声明')
+  const body=await rawRead(raw,descriptor.artifact.path,{token:rawToken,read,maxBytes:descriptor.artifact.bytes})
+  if(body.length!==descriptor.artifact.bytes||sha256(body)!==descriptor.artifact.sha256)throw Error('Skill 摘要错误')
+  const files=readZip(body)
+  const prefix=descriptor.id+'/'
+  if(!files.has(prefix+'SKILL.md')||[...files.keys()].some(k=>!k.startsWith(prefix)))throw Error('Skill ZIP 应只含固定 ID 目录及 SKILL.md')
+  const skill=files.get(prefix+'SKILL.md').toString('utf8')
+  if(!skill.startsWith('---')||!skill.includes('name: '+descriptor.id)||!skill.includes('description:'))throw Error('Skill 元数据缺失')
+  const item={...descriptor,artifact:{path:'packages/'+descriptor.artifact.sha256+'.zip',sha256:descriptor.artifact.sha256,bytes:body.length},dependencies:[],checks:[{type:'skill-discovery',name:descriptor.id}]}
+  const blobs=await resolveRuntime(item,{raw,rawToken,read})
+  validateCatalog({schemaVersion:2,items:[item]},'https://catalog.invalid/')
+  return {item,body,blobs}
 }

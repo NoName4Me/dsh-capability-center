@@ -13,6 +13,7 @@ test('Bundle 继承 npm 身份并拒绝未实现组件',()=>{
   const p={name:'@team/sample',version:'1.0.0',description:'测试',engines:{dsh:'>=0.2.1-rc.2'},dsh:{bundle:{patch:'./cordis.patch.yml'}}}
   assert.equal(pluginDescriptor(p).id,'sample')
   assert.throws(()=>pluginDescriptor(p,{version:'2.0.0'}))
-  assert.throws(()=>pluginDescriptor(p,{python:{}}))
+  assert.throws(()=>pluginDescriptor(p,{components:[{}]}))
+  assert.deepEqual(pluginDescriptor(p,{python:{requirements:[]}}).runtime.python,{requirements:[]})
   assert.throws(()=>registryUrl('https://a:b@example.com'))
 })

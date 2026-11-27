@@ -78,6 +78,41 @@ function validDependency(value) {
     && typeof value.version === 'string' && VERSION.test(value.version)
 }
 
+export function validateRuntime(value, base) {
+  if(value===undefined)return undefined
+  if(!value || typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(k=>!['python','assets'].includes(k)))throw new CapabilityError('invalid-runtime','运行依赖声明无效。')
+  let python
+  if(value.python!==undefined){
+    const p=value.python
+    if(!p||typeof p!=='object'||!Array.isArray(p.requirements)||p.requirements.length===0||p.requirements.length>128||
+      (p.inheritBuiltin!==undefined&&typeof p.inheritBuiltin!=='boolean')||Object.keys(p).some(k=>!['requirements','inheritBuiltin'].includes(k)))throw new CapabilityError('invalid-runtime','Python 依赖必须提供固定版本及 wheel 哈希。')
+    const names=new Set()
+    const requirements=p.requirements.map(row=>{
+      if(!row||typeof row.name!=='string'||!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/.test(row.name)||
+        typeof row.version!=='string'||!/^[0-9][0-9A-Za-z.!+_-]{0,79}$/.test(row.version)||
+        !Array.isArray(row.hashes)||!row.hashes.length||row.hashes.length>32||!row.hashes.every(h=>typeof h==='string'&&SHA256.test(h)))throw new CapabilityError('invalid-runtime','Python 锁定条目无效。')
+      const name=row.name.toLowerCase().replace(/[-_.]+/g,'-')
+      if(names.has(name))throw new CapabilityError('invalid-runtime','Python 依赖重复。')
+      names.add(name)
+      return {name,version:row.version,hashes:[...new Set(row.hashes)].sort()}
+    })
+    python={inheritBuiltin:p.inheritBuiltin===true,requirements}
+  }
+  const assets=value.assets??[]
+  if(!Array.isArray(assets)||assets.length>16)throw new CapabilityError('invalid-runtime','资源数量无效。')
+  const names=new Set()
+  const normalized=assets.map(a=>{
+    if(!a||typeof a.name!=='string'||!ID.test(a.name)||names.has(a.name)||!safeRelativePath(a.path)||! /^[A-Za-z0-9._/-]+$/.test(a.path)||
+      !SHA256.test(a.sha256)||!Number.isSafeInteger(a.bytes)||a.bytes<=0||a.bytes>MAX_ARTIFACT_BYTES||!['file','zip'].includes(a.format))throw new CapabilityError('invalid-runtime','资源声明无效。')
+    names.add(a.name)
+    const url=new URL(a.path,base)
+    if(url.origin!==new URL(base).origin||!url.pathname.startsWith(new URL(base).pathname))throw new CapabilityError('invalid-runtime','资源必须来自目录发布源。')
+    return {name:a.name,path:a.path,sha256:a.sha256,bytes:a.bytes,format:a.format,url:url.href}
+  })
+  if(!python&&!normalized.length)throw new CapabilityError('invalid-runtime','运行依赖不能为空。')
+  return {...(python?{python}:{}),assets:normalized}
+}
+
 function validateItem(item, index, base) {
   if (typeof item !== 'object' || item === null || Array.isArray(item)
     || typeof item.id !== 'string' || !ID.test(item.id)
@@ -145,6 +180,8 @@ function validateItem(item, index, base) {
       throw new CapabilityError('invalid-catalog', `Python 能力 ${item.id} 只支持 py3-none-any 纯 Python wheel。`)
     }
   }
+  const runtime=validateRuntime(item.runtime,base)
+  if(runtime&&!['plugin','skill'].includes(item.type))throw new CapabilityError('invalid-runtime','仅 Bundle 或 Skill 可声明独立运行依赖。')
   const artifactUrl = item.artifact === undefined
     ? undefined
     : new URL(item.artifact.path, base)
@@ -153,6 +190,7 @@ function validateItem(item, index, base) {
   }
   return Object.freeze({
     ...item,
+    ...(runtime?{runtime}:{}),
     artifact: artifactUrl === undefined
       ? undefined
       : Object.freeze({ ...item.artifact, url: artifactUrl.href }),
@@ -259,9 +297,10 @@ export function compatibilityError(item, {
 }
 
 export function serializableItem(item) {
-  const { artifact, ...rest } = item
+  const { artifact, runtime, ...rest } = item
   return {
     ...rest,
+    ...(runtime?{runtime:{...runtime,assets:runtime.assets.map(({url,...asset})=>asset)}}:{}),
     artifact: artifact === undefined ? undefined : {
       path: artifact.path,
       sha256: artifact.sha256,

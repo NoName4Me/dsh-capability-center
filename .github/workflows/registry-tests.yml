@@ -14,15 +14,14 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: '24'
-      - run: node --test packages/protocol/test.js apps/admin/test.js tests/catalog-sync.test.js
+      - run: node --test packages/protocol/test.js apps/admin/test.js tests/catalog-sync.test.js tests/runtime.test.js
 
       - run: npm ci
       - run: npm run typecheck
       - name: 生成 pnpm workspace 锁文件
         run: |
           npm install -g pnpm@10.18.3
-          pnpm install --lockfile-only --ignore-scripts
-          cat pnpm-lock.yaml
+          pnpm install --frozen-lockfile --ignore-scripts
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.12'

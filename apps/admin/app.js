@@ -13,7 +13,7 @@ async function refresh(){
   $('versions').replaceChildren()
   for(const v of result.versions){
     const row=element('div','');row.className='row'
-    const info=element('div','');info.append(element('strong',v.item.name+' · '+v.version),element('p',v.item.install.packageName+' / '+v.state))
+    const info=element('div','');info.append(element('strong',v.item.name+' · '+v.version),element('p',(v.item.install?.packageName??'Skill ZIP')+' / '+v.state))
     row.append(info)
     const actions={draft:['publish'],published:['delist','revoke'],delisted:['publish','revoke'],revoked:[]}[v.state]??[]
     for(const action of actions){
@@ -28,3 +28,5 @@ async function refresh(){
 }
 $('login').onsubmit=async e=>{e.preventDefault();token=$('token').value;$('token').value='';try{await refresh();status('已连接')}catch(e){status(e.message)}}
 $('import').onsubmit=async e=>{e.preventDefault();try{await api('import',{packageName:$('name').value.trim(),version:$('version').value.trim()});await refresh();status('已导入草稿，请核对后发布')}catch(e){status(e.message)}}
+
+$('import-raw').onsubmit=async e=>{e.preventDefault();try{await api('import-raw',{descriptorPath:$('raw-path').value.trim()});await refresh();status('已导入 Skill 草稿')}catch(e){status(e.message)}}

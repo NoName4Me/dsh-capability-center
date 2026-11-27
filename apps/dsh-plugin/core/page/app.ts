@@ -606,9 +606,9 @@
       addAction('install', '安装', () => runAction(item, 'install'), true, !state.online);
       return actions;
     }
-    const updatable = status.label === '可更新';
+    const updatable = state.online && (status.label === '可更新' || !!state.updates.items?.[item.id]);
     if (updatable) addAction('update', '更新', () => runAction(item, 'update'), true);
-    if (local.ready && item.trialAvailable !== false && typeof item.trial?.prompt === 'string') {
+    if (local.ready && !item.revoked && item.trialAvailable !== false && typeof item.trial?.prompt === 'string') {
       addAction('trial', '去使用', () => openTrialDraft(item), !updatable);
     }
     if (location === 'detail') {
@@ -1065,7 +1065,7 @@
       state.updates=await requestJson<UpdateSummary>('/capability-center/api/updates/read',{method:'POST',headers:{'content-type':'application/json','x-capability-center':'1'},body:JSON.stringify({serverUrl:activeServerUrl(),ids:state.updates.unread??[]})});
       if(state.filter==='new'){state.filter='all';for(const b of elements.filters.querySelectorAll<HTMLButtonElement>('[data-filter]')) b.setAttribute('aria-pressed',String(b.dataset.filter==='all'));}
       renderStatusMessages();render();notifyHostOfUpdateState();
-    }catch(error){state.error=error instanceof Error?error.message:String(error);renderStatusMessages();}
+    }catch(error){elements.updateNotice.append(el('span',{},error instanceof Error?error.message:String(error)));}
   }
 
   function renderStatusMessages() {
@@ -1454,6 +1454,6 @@
   void consumeRefreshNotice();
   setLoading(false);
   void Promise.all([loadRuntimeConfig(), loadCoreStatus(), load(activeServerUrl())]);
-  const noticeTimer=window.setInterval(()=>{if(!state.loading&&activeServerUrl()&&!state.operations.size)void load(activeServerUrl(),{background:true});},15*60_000);
+  const noticeTimer=window.setInterval(()=>{if(!state.loading&&activeServerUrl()&&![...state.operations.values()].some(op=>!op.terminal))void load(activeServerUrl(),{background:true});},15*60_000);
   window.addEventListener('pagehide',()=>window.clearInterval(noticeTimer),{once:true});
 })();

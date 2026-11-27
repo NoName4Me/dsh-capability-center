@@ -738,7 +738,8 @@ test('pending candidate that exits the process is quarantined and previous core 
         `import { EngineSupervisor } from ${JSON.stringify(pathToFileURL(join(
           import.meta.dirname,
           '..',
-          'src',
+          'apps',
+          'dsh-plugin',
           'bootstrap',
           'lib',
           'supervisor.js',
