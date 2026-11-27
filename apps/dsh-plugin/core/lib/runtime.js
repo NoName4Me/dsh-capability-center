@@ -39,6 +39,10 @@ function assetPath(path){
 export async function verifyRuntime(root,item,record){
  const directory=runtimePath(root,item.id,item.version)
  if(record?.directory!==directory)throw Error('运行环境账本路径不匹配')
+ for(const path of [join(root,'runtimes'),dirname(directory),directory]) {
+   const info=await lstat(path)
+   if(!info.isDirectory()||info.isSymbolicLink())throw Error('运行环境路径不安全')
+ }
  const ready=await readJson(join(directory,'runtime.json'))
  if(!ready||ready.id!==item.id||ready.version!==item.version||ready.fingerprint!==hash(canonical(descriptor(item.runtime))))throw Error('运行环境声明不匹配')
  await verifyOwnedFiles(directory,ready.files)
@@ -59,7 +63,12 @@ export async function prepareRuntime({root,item,operationId,http,basePython,befo
  const directory=runtimePath(root,item.id,item.version)
  await ensureDir(join(root,'runtimes'))
  await ensureDir(dirname(directory))
- const existing=await readJson(join(directory,'runtime.json'),null)
+ let existing
+ try{
+   const info=await lstat(directory)
+   if(!info.isDirectory()||info.isSymbolicLink())throw Error('运行环境路径不安全')
+   existing=await readJson(join(directory,'runtime.json'),null)
+ }catch(e){if(e.code!=='ENOENT')throw e}
  if(existing){
    if(item.runtime.python&&(existing.basePython!==basePython?.python||existing.baseVersion!==basePython?.version))throw Error('DSH Python 已变化，请先卸载旧运行环境后重装。')
    return await verifyRuntime(root,item,{directory})

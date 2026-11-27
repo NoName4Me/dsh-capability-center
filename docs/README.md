@@ -19,3 +19,5 @@
 - [DSH 内置办公能力核查](research/dsh-builtin-office-rc2.md)
 - [WPS 本地集成评估](research/wps-local-office-integration.md)
 - [离线 OCR 方案调研](research/dsh-offline-ocr.md)
+
+- [Mac 私服快速开始](development/mac-registry-quickstart.md)

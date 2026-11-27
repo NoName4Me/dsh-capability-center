@@ -1,10 +1,10 @@
-# DSH 能力中心 0.2.12
+# DSH 能力中心 0.3.0（私服联调版）
 
-> 正在规划私服版与 monorepo 迁移。本文仍为当前 0.2.12 的安装使用说明；下一阶段见[目标架构](docs/architecture/target-design.md)、[私服联调](docs/development/registry-integration.md)、[迁移计划](docs/development/migration-plan.md)。
+> 私服联调请先读 [Mac 私服快速开始](docs/development/mac-registry-quickstart.md)。Monorepo、管理后台与终端适配已实现，真实 Nexus/DSH 及 Windows 环境仍需联调。下方保留原离线使用方式；新的独立发布不需要全量离线包。
 
 面向内网 DSH `0.2.1-rc.2` 至 `0.2.2-rc.2` 的能力分发中心。它管理技能、DSH 插件、真实注册的 MCP 能力和能力包，不要求账号、凭据或模型调用。隐藏依赖中的纯 Python wheel 仍由本机账本管理，但不再作为顶部目录分类。安装只使用目录声明的本地制品、固定版本和 SHA-256。
 
-当前能力中心版本为 `0.2.12`。核心协议继续使用 `0.2.1-rc.2` 作为兼容标记；实际宿主版本门禁由引导插件和各个插件包的 `engines.dsh` 执行，覆盖文档中的 Win7 `0.2.1-rc.5`、Win10 `0.2.1-rc.2` 以及已验证的 macOS Web `0.2.2-rc.3` 基线。
+当前能力中心版本为 `0.3.0`。核心协议继续使用 `0.2.1-rc.2` 作为兼容标记；实际宿主版本门禁由引导插件和各个插件包的 `engines.dsh` 执行，覆盖文档中的 Win7 `0.2.1-rc.5`、Win10 `0.2.1-rc.2` 以及已验证的 macOS Web `0.2.2-rc.3` 基线。
 
 [项目文档索引](docs/README.md)
 
@@ -51,17 +51,17 @@ macOS 桌面自带 DSH 没有在官方 Web profile 中启用 `load_workspace_dep
 
 `capability-center-offline.zip` 解压后得到完整分发目录 `capability-center/`：
 
-- `packages/capability-center-0.2.12.tgz`：稳定引导插件，也是唯一需要首次通过 DSH“插件 → 添加插件”手动安装的制品。
-- `packages/dsh-intranet-auto-continue-1.1.0.tgz`：目录中的“自动续跑”宿主插件，由能力中心安装、更新和卸载。
+- `packages/capability-center-0.3.0.tgz`：稳定引导插件，也是唯一需要首次通过 DSH“插件 → 添加插件”手动安装的制品。
+- `packages/dsh-intranet-auto-continue-1.2.0.tgz`：目录中的“自动续跑”宿主插件，由能力中心安装、更新和卸载。
 - `packages/changfenhuang-dsh-genui-0.16.0.tgz`：目录中的“GenUI 交互式回复”试用插件。构建读取固定的上游制品，保留预编译运行文件和许可声明，目标机安装从内网分发包取件。
-- `packages/capability-center-ocr-0.1.0.tgz`：离线文字识别插件，随包提供简中、英文模型、WASM 和运行依赖。
-- `core/capability-center-core-0.2.12.zip`：当前可替换核心，包含可见插件目录、真实 MCP 可选标注、热切换与失败回退、更新红点、反馈配置、插件运行态检查、隐藏组件过滤和固定 Office 自动检查。
+- `packages/capability-center-ocr-0.2.0-offline.1.tgz`：离线文字识别插件，随包提供简中、英文模型、WASM 和运行依赖。
+- `core/capability-center-core-0.3.0.zip`：当前可替换核心，包含可见插件目录、真实 MCP 可选标注、热切换与失败回退、更新红点、反馈配置、插件运行态检查、隐藏组件过滤和固定 Office 自动检查。
 - `packages/office-enhancement-skill-1.0.0.zip`：Office 增强的隐藏技能，只包含固定的 `office_tools.py`、`office_smoke.py`、许可证和 provenance。
 - `packages/pypdf-7.1.0-py3-none-any.whl`：官方 PyPI 纯 Python wheel，作为 PDF 隐藏组件。
 - `catalog.json`、`core-release-index.json`、`artifact-manifest.json`、`publication-registry.json`：固定目录、核心索引、当前制品清单和发布校验记录。
 - `start-server.cmd`、`start-server.py`：只读分发服务。
 
-已有 `0.2.8` 的终端可直接更新核心。侧栏需要先安装 `0.2.12` 引导。之后侧栏会在刷新后读取当前核心的图标。
+已有 `0.2.8` 的终端可直接更新核心。侧栏需要先安装 `0.3.0` 引导。之后侧栏会在刷新后读取当前核心的图标。
 
 ### GenUI 实机验收
 
@@ -77,7 +77,7 @@ macOS 桌面自带 DSH 没有在官方 Web profile 中启用 `load_workspace_dep
    ```
 
 3. 在 DSH 中打开“插件 → 添加插件”，粘贴服务打印的 `Initial plugin URL`。
-4. 安装并启用 `capability-center-0.2.12.tgz`，根据 DSH 返回结果重启。这是本产品唯一需要手动交给 DSH 安装的插件。
+4. 安装并启用 `capability-center-0.3.0.tgz`，根据 DSH 返回结果重启。这是本产品唯一需要手动交给 DSH 安装的插件。
 5. 打开侧栏“能力中心”，填写分发基础地址，例如 `http://192.168.1.20:8765/`。
 
 分发服务没有登录、上传接口或写接口。请用防火墙限制到公司内网，并为分发机配置稳定地址。
@@ -89,10 +89,10 @@ macOS 桌面自带 DSH 没有在官方 Web profile 中启用 `load_workspace_dep
 1. 在“能力中心”填写分发地址，点“检查更新”。
 2. 点“下载更新”。在旧版页面中，此按钮叫“准备更新”。
 3. 使用 `0.2.8` 或更新的引导时，点击“刷新生效”。监督器会停止旧核心的新操作、等待队列完成、启动并校验候选核心；成功后刷新 DSH 顶层页面。候选失败时隔离候选并恢复旧核心，不会显示成功 toast。
-4. 仍由旧引导运行时，可下载核心后在下次 DSH 启动中激活，保留旧 bootstrap 的自然启动路径。需要后续热切换时，再从 DSH 插件页替换为 `capability-center-0.2.12.tgz`。
-5. 重新打开“能力中心”，确认核心为 `v0.2.12`。普通插件返回 `applied` 且运行态为 `active` 时只显示“刷新页面生效”；宿主要求重启时，支持原生重启的桌面端会显示“重启 DSH”。其他宿主会提示退出并重新打开。
+4. 仍由旧引导运行时，可下载核心后在下次 DSH 启动中激活，保留旧 bootstrap 的自然启动路径。需要后续热切换时，再从 DSH 插件页替换为 `capability-center-0.3.0.tgz`。
+5. 重新打开“能力中心”，确认核心为 `v0.3.0`。普通插件返回 `applied` 且运行态为 `active` 时只显示“刷新页面生效”；宿主要求重启时，支持原生重启的桌面端会显示“重启 DSH”。其他宿主会提示退出并重新打开。
 
-从更早版本升级时，顶部核心检查仍独立读取 `core-release-index.json`。即使旧核心因目录检查类型较新而无法显示能力列表，也先准备并重启到 `0.2.12`，再刷新目录。引导过旧且没有核心更新控件时，才需要用 `packages/capability-center-0.2.12.tgz` 人工替换一次。新版 bootstrap 自带较高 seed 时，只会在没有更高 pending、且同版 seed 未被隔离失败时自动提级；旧 bootstrap 仍按持久 `pending` 在自然启动中生效。
+从更早版本升级时，顶部核心检查仍独立读取 `core-release-index.json`。即使旧核心因目录检查类型较新而无法显示能力列表，也先准备并重启到 `0.3.0`，再刷新目录。引导过旧且没有核心更新控件时，才需要用 `packages/capability-center-0.3.0.tgz` 人工替换一次。新版 bootstrap 自带较高 seed 时，只会在没有更高 pending、且同版 seed 未被隔离失败时自动提级；旧 bootstrap 仍按持久 `pending` 在自然启动中生效。
 
 ### 管理已下架的示例能力
 
@@ -197,7 +197,7 @@ CAPABILITY_CENTER_BUILD_PYTHON=/path/to/python3 npm run build
 
 ```sh
 node tools/publish.mjs catalog --storage dist --catalog dist/catalog.json
-node tools/publish.mjs core --storage dist --archive dist/core/capability-center-core-0.2.12.zip
+node tools/publish.mjs core --storage dist --archive dist/core/capability-center-core-0.3.0.zip
 ```
 
 历史离线 ZIP 由 GitHub Releases 按版本保留。作者工具对同一个分发目录以 `publication-registry.json` 校验同版本制品一致性。修改已发布的能力制品时，请提升其版本。

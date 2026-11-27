@@ -84,7 +84,7 @@ export async function resolveSkill({raw,rawToken,descriptorPath,read=readBounded
   if(!files.has(prefix+'SKILL.md')||[...files.keys()].some(k=>!k.startsWith(prefix)))throw Error('Skill ZIP 应只含固定 ID 目录及 SKILL.md')
   const skill=files.get(prefix+'SKILL.md').toString('utf8')
   if(!skill.startsWith('---')||!skill.includes('name: '+descriptor.id)||!skill.includes('description:'))throw Error('Skill 元数据缺失')
-  const item={...descriptor,artifact:{path:'packages/'+descriptor.artifact.sha256+'.zip',sha256:descriptor.artifact.sha256,bytes:body.length},dependencies:[],checks:[{type:'skill-discovery',name:descriptor.id}]}
+  const item={...descriptor,artifact:{path:'packages/'+descriptor.artifact.sha256+'.zip',sha256:descriptor.artifact.sha256,bytes:body.length},dependencies:[],checks:[{type:'skill-discovery',name:descriptor.id},...(Array.isArray(descriptor.checks)?descriptor.checks.filter(c=>c?.type==='python-import'):[])]}
   const blobs=await resolveRuntime(item,{raw,rawToken,read})
   validateCatalog({schemaVersion:2,items:[item]},'https://catalog.invalid/')
   return {item,body,blobs}

@@ -16,7 +16,7 @@ export class CatalogSync {
   async initialize(){
     const config=await readJson(join(this.root,'source.json'),{})
     // Configuration from the installer is a default only; an explicit offline choice wins.
-    this.source=config.source??process.env.DSH_CATALOG_URL??''
+    this.source=config.source===''?'':process.env.DSH_CATALOG_URL?normalizeServerUrl(process.env.DSH_CATALOG_URL):config.source??''
   }
   async select(value){
     const source=value?normalizeServerUrl(value):''

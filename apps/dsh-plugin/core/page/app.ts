@@ -60,6 +60,7 @@
 
   interface RuntimeConfig {
     feedbackEmail?: string | null;
+    catalogUrl?: string;
   }
 
   interface UpdateSummary {
@@ -432,7 +433,7 @@
       elements.list.replaceChildren();
     }
     try {
-      const query = serverUrl ? `?server=${encodeURIComponent(serverUrl)}` : '';
+      const query = state.localOnly ? '?offline=1' : serverUrl ? `?server=${encodeURIComponent(serverUrl)}` : '';
       const payload = await requestJson<StatusPayload>(`/capability-center/api/status${query}`, {
         headers: { accept: 'application/json' },
       });
@@ -1267,6 +1268,11 @@
       const payload = await requestJson<RuntimeConfig>('/capability-center/api/config', {
         headers: { accept: 'application/json' },
       });
+      if (payload.catalogUrl) {
+        state.serverUrl=payload.catalogUrl;
+        elements.serverUrl.value=payload.catalogUrl;
+        localStorage.setItem(STORAGE_KEY,payload.catalogUrl);
+      }
       state.feedbackEmail = typeof payload.feedbackEmail === 'string'
         && payload.feedbackEmail.trim() !== ''
         ? payload.feedbackEmail.trim()
@@ -1453,7 +1459,7 @@
   elements.serverUrl.value = state.serverUrl;
   void consumeRefreshNotice();
   setLoading(false);
-  void Promise.all([loadRuntimeConfig(), loadCoreStatus(), load(activeServerUrl())]);
+  void (async()=>{await loadRuntimeConfig();await Promise.all([loadCoreStatus(),load(activeServerUrl())]);})();
   const noticeTimer=window.setInterval(()=>{if(!state.loading&&activeServerUrl()&&![...state.operations.values()].some(op=>!op.terminal))void load(activeServerUrl(),{background:true});},15*60_000);
   window.addEventListener('pagehide',()=>window.clearInterval(noticeTimer),{once:true});
 })();

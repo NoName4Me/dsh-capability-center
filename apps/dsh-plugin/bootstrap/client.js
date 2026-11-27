@@ -256,7 +256,7 @@ window.__ModuleLoader__.load({
           checkController = controller;
           const serverUrl = readStorage(SERVER_STORAGE_KEY)?.trim() ?? '';
           const offline = readStorage(OFFLINE_STORAGE_KEY) === 'true';
-          const query = !offline && serverUrl !== ''
+          const query = offline ? '?offline=1' : serverUrl !== ''
             ? `?server=${encodeURIComponent(serverUrl)}`
             : '';
           try {

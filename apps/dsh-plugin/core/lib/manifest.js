@@ -185,7 +185,7 @@ function validateItem(item, index, base) {
   const artifactUrl = item.artifact === undefined
     ? undefined
     : new URL(item.artifact.path, base)
-  if (artifactUrl !== undefined && artifactUrl.origin !== new URL(base).origin) {
+  if (artifactUrl !== undefined && (artifactUrl.origin !== new URL(base).origin || !artifactUrl.pathname.startsWith(new URL(base).pathname) || artifactUrl.search || artifactUrl.hash)) {
     throw new CapabilityError('invalid-catalog', `能力 ${item.id} 的制品必须来自内网目录同源服务器。`)
   }
   return Object.freeze({

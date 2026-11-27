@@ -982,6 +982,7 @@ export class CoreService {
     for (const item of plan.order) {
       const entry = this.ledger.get(item.id)
       if (entry !== undefined) {
+        if(entry.type!==item.type)throw new CapabilityError('implementation-changed', '能力实现类型已变更，请先卸载旧版本再安装新版本。')
         if ((entry.preexisting === true || entry.borrowed === true || entry.legacy === true)
           && entry.version !== item.version) {
           throw new CapabilityError(
@@ -2380,14 +2381,12 @@ export class CoreService {
       }
       if (route === '/api/config') {
         if (req.method !== 'GET') throw Object.assign(new Error('Method not allowed'), { status: 405 })
-        this.sendJson(res, 200, this.feedbackEmail === undefined
-          ? {}
-          : { feedbackEmail: this.feedbackEmail })
+        this.sendJson(res, 200, { ...(this.feedbackEmail===undefined?{}:{feedbackEmail:this.feedbackEmail}), ...(process.env.DSH_CATALOG_URL?{catalogUrl:normalizeServerUrl(process.env.DSH_CATALOG_URL)}:{}) })
         return true
       }
       if (route === '/api/updates') {
         if (req.method !== 'GET') throw Object.assign(new Error('Method not allowed'), { status: 405 })
-        this.sendJson(res, 200, await this.updateSummary(url.searchParams.get('server') ?? '', {force:false}))
+        this.sendJson(res, 200, await this.updateSummary(url.searchParams.get('offline')==='1'?'':(url.searchParams.get('server')??this.catalogSync.source), {force:false}))
         return true
       }
       if (route === '/api/updates/read') {
@@ -2405,7 +2404,7 @@ export class CoreService {
       }
       if (route === '/api/status') {
         if (req.method !== 'GET') throw Object.assign(new Error('Method not allowed'), { status: 405 })
-        this.sendJson(res, 200, await this.inspect(url.searchParams.get('server') ?? ''))
+        this.sendJson(res, 200, await this.inspect(url.searchParams.get('offline')==='1'?'':(url.searchParams.get('server')??this.catalogSync.source)))
         return true
       }
       if (route.startsWith('/api/operations/')) {
